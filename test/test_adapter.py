@@ -27,6 +27,8 @@ fake_agent = FakeAgent()
 fake_laya = types.ModuleType("laya")
 fake_laya.load = lambda model, device="cpu": fake_agent
 sys.modules["laya"] = fake_laya
+import os
+os.environ["LAYAVIEW_INSTANCE_TOKEN"] = "test-instance-token"
 
 module_path = Path(__file__).resolve().parents[1] / "adapter" / "laya_server.py"
 spec = importlib.util.spec_from_file_location("layaview_laya_adapter_test", module_path)
@@ -62,6 +64,7 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(value["backend"], "laya")
         self.assertEqual(value["model"], "convaiinnovations/laya-typed-decisions")
+        self.assertEqual(value["instance"], "test-instance-token")
 
     def test_system_one_shape_and_derived_confidence(self):
         payload = json.dumps({

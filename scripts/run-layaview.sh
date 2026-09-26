@@ -26,6 +26,8 @@ if ! "$PYTHON" -c 'import laya' >/dev/null 2>&1; then
   echo "Layaview: $PYTHON does not have the laya package. See adapter/README.md." >&2
   exit 1
 fi
+LAYAVIEW_INSTANCE_TOKEN="${LAYAVIEW_INSTANCE_TOKEN:-$("$PYTHON" -c 'import secrets; print(secrets.token_hex(16))')}"
+export LAYAVIEW_INSTANCE_TOKEN
 port_free() {
   "$PYTHON" - "$1" <<'PY'
 import socket, sys
@@ -59,10 +61,15 @@ trap cleanup EXIT INT TERM HUP
 ready=0
 i=0
 while [ "$i" -lt 120 ]; do
-  if "$PYTHON" - "$LAYA_PORT" >/dev/null 2>&1 <<'PY'
-import sys, urllib.request
+  if ! kill -0 "$LAYA_PID" >/dev/null 2>&1; then
+    echo "Layaview: Laya adapter exited during startup. See $LOG_DIR/laya-adapter.log" >&2
+    exit 1
+  fi
+  if "$PYTHON" - "$LAYA_PORT" "$LAYAVIEW_INSTANCE_TOKEN" >/dev/null 2>&1 <<'PY'
+import json, sys, urllib.request
 with urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/healthz", timeout=1) as r:
-    if r.status != 200:
+    value = json.load(r)
+    if r.status != 200 or value.get("instance") != sys.argv[2]:
         raise SystemExit(1)
 PY
   then ready=1; break; fi

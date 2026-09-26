@@ -17,6 +17,7 @@ import laya
 
 MODEL_NAME = os.environ.get("LAYA_MODEL", "convaiinnovations/laya-typed-decisions")
 DEVICE = os.environ.get("LAYA_DEVICE", "cpu")
+INSTANCE_TOKEN = os.environ.get("LAYAVIEW_INSTANCE_TOKEN", "")
 BODY_LIMIT = 16 * 1024 * 1024
 PREDICT_LOCK = threading.Lock()
 LOOPBACK_HOST = re.compile(r"^(127\.0\.0\.1|\[::1\]|([a-z0-9-]+\.)*localhost)(:\d+)?$", re.IGNORECASE)
@@ -96,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_request():
             return
         if self.path == "/healthz":
-            self.send_json(200, {"ok": True, "backend": "laya", "model": MODEL_NAME, "device": DEVICE})
+            self.send_json(200, {"ok": True, "backend": "laya", "model": MODEL_NAME, "device": DEVICE, "instance": INSTANCE_TOKEN})
             return
         self.send_json(404, {"error": "not found"})
 

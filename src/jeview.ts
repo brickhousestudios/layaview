@@ -24,7 +24,7 @@ export const JEV_ENDPOINT = LAYA_ENDPOINT;
 export const DATABASE = "layaview.sqlite";
 const BODY_LIMIT = 16 * 1024 * 1024;
 const PAGE = 5000, IDS_LISTED = 1000; // summaries in one answer: a page of the history, or the calls named by id (as many as a search finds)
-const REQUEST_DROP = new Set(["host", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer", "content-length", "accept-encoding", "authorization", "cookie", "origin", "referer"]);
+const REQUEST_DROP = new Set(["host", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer", "content-length", "accept-encoding", "authorization", "proxy-authorization", "cookie", "origin", "referer"]);
 // fetch has already decoded the body, so its length and encoding no longer describe what is sent on
 const RESPONSE_DROP = new Set(["connection", "keep-alive", "transfer-encoding", "content-length", "content-encoding"]);
 // the names this machine goes by. Any name ending in .localhost is one of them: that ending is reserved for the machine

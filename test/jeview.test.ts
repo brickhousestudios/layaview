@@ -67,7 +67,7 @@ test("a Laya request needs no key, keeps the body whole, strips caller auth, add
   const { base, dir } = await proxy(t, upstream.url);
   const response = await fetch(`${base}/mythos/stage-2/v1/systemone`, {
     method: "POST",
-    headers: { authorization: "Bearer caller-secret", "content-type": "application/json" },
+    headers: { authorization: "Bearer caller-secret", "proxy-authorization": "Basic proxy-secret", "content-type": "application/json" },
     body: layaBody,
   });
   assert.equal(response.status, 200);
@@ -79,7 +79,7 @@ test("a Laya request needs no key, keeps the body whole, strips caller auth, add
 
   assert.equal(upstream.seen.length, 1);
   const sent = upstream.seen[0]!;
-  assert.deepEqual([sent.method, sent.url, sent.body, sent.headers.authorization], ["POST", "/v1/systemone", layaBody, undefined]);
+  assert.deepEqual([sent.method, sent.url, sent.body, sent.headers.authorization, sent.headers["proxy-authorization"]], ["POST", "/v1/systemone", layaBody, undefined, undefined]);
 
   const listed = await records(base), summary = listed.records[0]!;
   assert.deepEqual([listed.cursor, summary.label, summary.trigger], [1, "mythos/stage-2", null]);
