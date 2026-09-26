@@ -39,7 +39,7 @@
   .bubble .text { margin: 0; }
   .bubble.reply { background: #2a1a10; border: 1px solid rgb(255 92 0 / 28%); border-radius: 14px 14px 4px 14px; animation: arrive .35s cubic-bezier(.2, .8, .2, 1); }
   .bubble.note { background: none; border: 1px dashed var(--line); color: var(--dull); font-size: 13px; }
-  /* what Jev decided about the message, one chip per answer, in the order the answers came */
+  /* what Laya decided about the message, one chip per answer, in the order the answers came */
   .chips { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 40px; min-height: 24px; align-items: center; }
   .chip { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--line); color: var(--muted); animation: pop .3s cubic-bezier(.2, 1.4, .4, 1); white-space: nowrap; }
   @keyframes pop { from { opacity: 0; transform: scale(.7); } }
@@ -58,14 +58,14 @@
 </head>
 <body>
 <header>
-  <div class="brand"><span class="dot"></span>Support Desk <small>triaged by <em>Jev</em></small></div>
-  <a id="jeview" href="http://127.0.0.1:4777/" target="_blank" rel="noopener">Watch Jev think in Jeview ↗</a>
+  <div class="brand"><span class="dot"></span>Support Desk <small>triaged by <em>Laya</em></small></div>
+  <a id="jeview" href="http://127.0.0.1:4777/" target="_blank" rel="noopener">Watch Laya think in Layaview ↗</a>
 </header>
 <main>
   <section class="teams" id="teams" aria-label="Teams"></section>
   <section class="feed" id="feed" aria-label="Conversations" aria-live="polite"><p class="waiting" id="waiting">Waiting for the first customer…</p></section>
 </main>
-<footer>Made-up customers. The replies are templates, filled in with what Jev decided.</footer>
+<footer>Made-up customers. The replies are templates, filled in with what Laya decided.</footer>
 <script src="/support-desk.js"></script>
 </body>
 </html>

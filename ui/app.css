@@ -1,7 +1,7 @@
-/* Jeview: paper, ink and one orange, for watching Jev calls land. */
+/* Layaview: paper, ink and one orange, for watching Laya calls land. */
 
 :root {
-  /* branch tints, from a palette validated for both modes (no orange: Jev's; no red: Invalid's) */
+  /* branch tints, from a palette validated for both modes (no orange: Laya's; no red: Invalid's) */
   --tree-1: #2a78d6; --tree-2: #1baf7a; --tree-3: #4a3aa7; --tree-4: #e87ba4; --tree-5: #eda100; --tree-6: #008300;
   --paper: #f6f6f6; --panel: #fbfbfa; --ink: #1d1d1d; --muted: #4a4a4a; --dull: #686868;
   --hairline: rgb(29 29 29 / 14%); --hairline-strong: rgb(29 29 29 / 26%); --wash: rgb(29 29 29 / 5%);
@@ -127,7 +127,7 @@ code { font-family: var(--mono); font-size: .86em; background: var(--wash); bord
 .mark-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ink); }
 .mark-dot.failed { background: var(--red); border-radius: 1px; transform: rotate(45deg) scale(.8); }
 
-.empty { position: fixed; transform: translateX(-50%); width: min(520px, 90vw); display: grid; gap: 10px; text-align: center; pointer-events: none; z-index: 1; } /* placed under the Jev dot */
+.empty { position: fixed; transform: translateX(-50%); width: min(520px, 90vw); display: grid; gap: 10px; text-align: center; pointer-events: none; z-index: 1; } /* placed under the Laya dot */
 .empty .display { font-size: 34px; }
 
 .popover { position: fixed; top: 64px; right: 24px; width: min(380px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--hairline); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); z-index: 4; }

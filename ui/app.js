@@ -1,5 +1,5 @@
-// Jeview. Jev sits in the centre; the questions it is asked sit around it, each labelled with the question itself;
-// every answer a question can get sits beyond it, showing the probability Jev last gave it. A question asked after an
+// Layaview. Laya sits in the centre; the questions it is asked sit around it, each labelled with the question itself;
+// every answer a question can get sits beyond it, showing the probability Laya last gave it. A question asked after an
 // answer (its request named that answer's event id as its trigger) grows as a branch off that answer. A call flies in
 // from the edge and out along its whole path, drawing anything new as it passes. A question that has not been asked
 // for a while fades off the map. The corner lists recent calls and reads one question at a time; a call opens in the
@@ -28,7 +28,6 @@
   const clip = (value, n) => value.length > n ? value.slice(0, n - 1).trimEnd() + "…" : value;
   const questionOf = (q) => plainQuestion(q.asks) || human(kindOf(q.id));
   const pct = (n) => `${Math.round(n * 100)}%`;
-  const money = (n) => "$" + (n === 0 ? "0" : n < 0.01 ? n.toPrecision(2) : n.toFixed(2));
   const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
   const text = (value) => typeof value === "string" ? value : value === undefined ? "" : JSON.stringify(value);
   const seconds = (ms) => ms === null ? "–" : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
@@ -81,7 +80,7 @@
     try { for (const record of (await (await fetch(`/_/api/records?ids=${missing.join(",")}`)).json()).records) if (!data.byId.has(record.id)) data.byId.set(record.id, record); } catch { /* listed without them */ }
   }
   // ---------- an option's name ----------
-  // An option is shown by its key, unless the call said in a Jeview-Display header which part of its criteria to show
+  // An option is shown by its key, unless the call said in a Layaview-Display header which part of its criteria to show
   // instead. The names are not in the summaries: they are read once, from one whole call that carries the header, and then
   // hold for that question in that run, earlier calls included. Another run may hang other things on the same keys, so it
   // keeps its own names, or its keys. An option without that part keeps its key (null here, so it is not looked for again).
@@ -109,7 +108,7 @@
   }
 
   // ---------- the map model: questions and the answers they got ----------
-  // Every question and answer is a body: a box around its dot and its text, centred on (x, y). Jev is a fixed body.
+  // Every question and answer is a body: a box around its dot and its text, centred on (x, y). Laya is a fixed body.
   const world = { kinds: new Map(), events: new Map(), families: new Map(), lineages: new Map(), jev: { x: 0, y: 0, w: 76, h: 76, fixed: true }, area: { l: 0, t: 0, r: 0, b: 0 }, shown: "" };
   /** How present a question is: 1 while it is being asked, then fading gradually from FADE_AFTER without a request
    * until it is gone at GONE_AFTER. Time is the latest activity, not the wall clock, so a finished run keeps its
@@ -163,14 +162,14 @@
   }
   /** Where each of a call's answers lands, and each answer's event id remembered for the calls it may trigger. */
   function targetsOf(record) {
-    const parent = data.traces ? parentOf(record) : null, when = finished(record); // traces off: every question straight off Jev
+    const parent = data.traces ? parentOf(record) : null, when = finished(record); // traces off: every question straight off Laya
     return record.questions.map((q) => {
       const target = node(q, when, parent);
       if (target) world.events.set(eventOf(record, q), { kind: target.kind, name: target.option.name });
       return target;
     }).filter(Boolean);
   }
-  /** The one Invalid dot: every call Jev rejected lands here. It sits in the ring like a question, with no answers. */
+  /** The one Invalid dot: every call Laya rejected lands here. It sits in the ring like a question, with no answers. */
   function invalidNode(when) {
     let node = world.kinds.get(INVALID);
     if (!node) { node = { key: INVALID, name: INVALID, parent: null, depth: 0, special: "invalid", count: 0, ids: [], options: new Map(), x: world.jev.x, y: world.jev.y, w: 0, h: 0, r: 0, asks: "Invalid", lastSeen: when, placed: false, revealed: false }; world.kinds.set(INVALID, node); }
@@ -180,8 +179,8 @@
     return node;
   }
   const refuse = (record, node) => { node.count++; node.ids.push(record.id); };
-  /** The answers a question can get, shown before Jev picks them: a choice's options (when there are few enough to
-   * read), yes and no, or a ranking's levels. A choice with many options shows only those Jev actually gives. */
+  /** The answers a question can get, shown before Laya picks them: a choice's options (when there are few enough to
+   * read), yes and no, or a ranking's levels. A choice with many options shows only those Laya actually gives. */
   function candidates(q) {
     if (q.noul !== undefined || q.type === "noul") return ["yes", "no"];
     if (q.score !== undefined || q.type === "score") return q.levels ? Array.from({ length: q.levels }, (_, i) => `level ${i}`) : [];
@@ -192,14 +191,14 @@
     if (!answer) { answer = { name, kind, count: 0, ids: [], x: kind.x, y: kind.y, w: 0, h: 0, r: 0, revealed: false }; kind.options.set(name, answer); placeAnswer(answer); }
     return answer;
   }
-  /** The probability Jev gave one answer in one call: every option of a choice or level of a ranking, both sides of a yes/no. */
+  /** The probability Laya gave one answer in one call: every option of a choice or level of a ranking, both sides of a yes/no. */
   function probabilityOf(q, name) {
     if (q.noul !== undefined) return name === "yes" ? q.noul : name === "no" ? 1 - q.noul : null;
     const key = q.score !== undefined ? name.replace(/^level /, "") : name;
     if (q.probabilities && typeof q.probabilities[key] === "number") return q.probabilities[key];
     return name === landing(q) ? landedP(q) : null;
   }
-  /** The probability Jev gave the answer it landed on (older records carry only the confidence). */
+  /** The probability Laya gave the answer it landed on (older records carry only the confidence). */
   const landedP = (q) => q.p ?? (q.noul !== undefined ? Math.max(q.noul, 1 - q.noul) : q.confidence ?? null);
   /** A body appears when the ball reaches it; `born` times its growing in. */
   function reveal(body, now = performance.now()) { if (!body.revealed) { body.revealed = true; body.born = now; } }
@@ -236,7 +235,7 @@
     for (const kind of world.kinds.values()) for (const b of [kind, ...kind.options.values()]) { b.x += dx; b.y += dy; if (b.tx !== undefined) { b.tx += dx; b.ty += dy; } } // the map moves as one
   }
   const reach = () => Math.min(world.area.r - world.area.l, world.area.b - world.area.t) * 0.34;
-  /** A new question goes into the widest gap around Jev; a branch starts just beyond the answer that led to it. */
+  /** A new question goes into the widest gap around Laya; a branch starts just beyond the answer that led to it. */
   function place(kind) {
     if (kind.parent) {
       const a = kind.parent, angle = Math.atan2(a.y - a.kind.y, a.x - a.kind.x);
@@ -251,7 +250,7 @@
     }
     kind.x = world.jev.x + Math.cos(angle) * reach() * 0.6; kind.y = world.jev.y + Math.sin(angle) * reach() * 0.6; kind.placed = true;
   }
-  /** A new answer starts just beyond its question, away from Jev. */
+  /** A new answer starts just beyond its question, away from Laya. */
   function placeAnswer(option) {
     const k = option.kind, from = k.parent ?? world.jev, dx = k.x - from.x, dy = k.y - from.y, d = Math.hypot(dx, dy) || 1, spread = (hash(option.name) - 0.5) * 1.4;
     const angle = Math.atan2(dy / d, dx / d) + spread;
@@ -299,9 +298,9 @@
    * branch is added, a box outgrows its spot); the bodies then ease there and stay still.
    *
    * Everything already on the map keeps its spot. Something new looks for room close to where it belongs: a first
-   * question in its gap round Jev, a branch onward from the answer that led to it, an answer fanned beyond its
+   * question in its gap round Laya, a branch onward from the answer that led to it, an answer fanned beyond its
    * question. Only when there is no room nearby does the whole map re-arrange: the questions asked first evenly
-   * spaced round Jev in the order they already stand, branches outward, parents first, each box stepping out until
+   * spaced round Laya in the order they already stand, branches outward, parents first, each box stepping out until
    * it clears every box already placed, so nothing overlaps. The view then fits the whole map. */
   /** Where a branch grows from: the answers that led to it (one, or with Deduplicate several), and onward in their
    * direction from their question. Null until they have spots. */
@@ -311,7 +310,7 @@
     const x = ps.reduce((n, a) => n + a.tx, 0) / ps.length, y = ps.reduce((n, a) => n + a.ty, 0) / ps.length, q = k.parent.kind;
     return { x, y, angle: Math.atan2(y - q.ty, x - q.tx), h: Math.max(...ps.map((a) => a.h)) };
   }
-  /** The direction a question faces: away from Jev, or from the answers that led to it. */
+  /** The direction a question faces: away from Laya, or from the answers that led to it. */
   function awayAngle(k) {
     const at = k.parent ? anchor(k) : null;
     return Math.atan2(k.ty - (at ? at.y : world.jev.y), k.tx - (at ? at.x : world.jev.x));
@@ -344,7 +343,7 @@
       world.pace = world.bounds ? 0.035 : 0.06; // a whole re-arrange eases over slowly
       // a question, then its answers fanned beyond it, each stepping out until clear
       const put = (k, x, y, angle, from) => { if (!k.pin) { k.angle = angle; out(k, x, y, angle, from); } for (const o of k.options.values()) out(o, k.tx, k.ty, fanOf(k, o), (k.h + o.h) / 2 + ANSWER_OUT); };
-      // the questions asked first: evenly spaced round Jev, in the order they already stand, turned as little as possible
+      // the questions asked first: evenly spaced round Laya, in the order they already stand, turned as little as possible
       const angleOf = (k) => Math.atan2(k.y - jev.y, k.x - jev.x);
       roots.sort((a, b) => angleOf(a) - angleOf(b));
       const slice = TAU / Math.max(roots.length, 1);
@@ -369,7 +368,7 @@
     function settle() {
       const near = (body, x, y, angle, from) => out(body, x, y, angle, from, NEAR);
       /** A spot left behind: what it hangs off has moved (or it was remembered from another arrangement), and it is now
-       * further from it than it could have been put. A first question can sit anywhere round Jev. */
+       * further from it than it could have been put. A first question can sit anywhere round Laya. */
       const strayed = (body) => {
         const at = body.kind ? { x: body.kind.tx, y: body.kind.ty, h: body.kind.h } : body.parent ? anchor(body) : null;
         if (!at) return false;
@@ -387,7 +386,7 @@
         }
       }
       for (const body of fresh) {
-        if (!body.kind) { // a question: round Jev, or onward from the answer that led to it
+        if (!body.kind) { // a question: round Laya, or onward from the answer that led to it
           const at = body.parent ? anchor(body) : null;
           if (body.parent && !at) return false;
           body.angle = at ? at.angle : Math.atan2(body.y - jev.y, body.x - jev.x);
@@ -406,7 +405,7 @@
   const LAYOUT = "jeview.layout", LAYOUT_MAX = 1000;
   const bodyKey = (b) => (b.kind ? `${b.kind.key}::${b.name}` : b.key);
   function savedLayout() { try { return new Map(Object.entries(JSON.parse(localStorage.getItem(LAYOUT) ?? "{}"))); } catch { return new Map(); } }
-  /** Each spot as an offset from Jev, so a different window size moves the map as one; a hand-placed question is marked. */
+  /** Each spot as an offset from Laya, so a different window size moves the map as one; a hand-placed question is marked. */
   function saveLayout() {
     world.unsaved = false;
     const saved = savedLayout();
@@ -460,7 +459,7 @@
     const pts = p.path(), seg = Math.min(pts.length - 1, Math.floor(u * pts.length)), t = u * pts.length - seg, [a, c, b] = pts[seg];
     return [lerp(lerp(a[0], c[0], t), lerp(c[0], b[0], t), t), lerp(lerp(a[1], c[1], t), lerp(c[1], b[1], t), t)];
   }
-  // every path runs from Jev: to a first question, or on through each answer that led to a branch
+  // every path runs from Laya: to a first question, or on through each answer that led to a branch
   const leg = (from, to, amount) => [from, bend(from[0], from[1], to[0], to[1], amount), to];
   // `via` is the answer a call came through, for a question more than one answer leads to; otherwise its first
   const legsTo = (kind, via = kind.parent) => via ? [...legsTo(via.kind), leg(dot(via.kind), dot(via), 0.1), leg(dot(via), dot(kind), 0)] : [leg([world.jev.x, world.jev.y], dot(kind), 0)];
@@ -556,7 +555,7 @@
     plate(x, top, Math.max(...list.map((line) => ctx.measureText(line).width)), list.length * Q_LINE);
     list.forEach((line, i) => write(line, x, top + (i + 0.5) * Q_LINE));
   }
-  /** A call's paths: from Jev, through each answer that led to it, to each answer it got. */
+  /** A call's paths: from Laya, through each answer that led to it, to each answer it got. */
   function callPaths(id) {
     const record = data.byId.get(id), paths = [], via = record && data.traces ? parentOf(record) ?? undefined : undefined;
     for (const q of record?.questions ?? []) {
@@ -608,7 +607,7 @@
     for (const k of [...lit]) if (k.options) for (const up of stopsTo(k)) lit.add(up); // a lit branch lights the way to it
     const born = (body) => body.born === undefined ? 1 : clamp((now - body.born) / 350, 0, 1); // growing in after its ball arrives
     const alpha = (item, kind) => presence(kind) * born(item) * (lit.size && !lit.has(item) ? 0.14 : 1);
-    // lines: into each question (from Jev, or from the answer that led to it), and out to its answers
+    // lines: into each question (from Laya, or from the answer that led to it), and out to its answers
     for (const kind of kinds) {
       if (!kind.revealed) continue;
       if (kind.special) { ctx.strokeStyle = colors.red; ctx.lineWidth = 1; ctx.globalAlpha = alpha(kind, kind) * 0.45; stroke(legsTo(kind)); continue; }
@@ -645,7 +644,7 @@
       ctx.lineTo(...at(p, e)); ctx.stroke();
     }
     ctx.globalAlpha = 1;
-    // the open call: its whole path from Jev, in the one orange, its answers ringed
+    // the open call: its whole path from Laya, in the one orange, its answers ringed
     if (chain.length && !hovered) {
       ctx.globalAlpha = 1; ctx.strokeStyle = colors.accent; ctx.lineWidth = 1.8;
       for (const p of chain) stroke(legs(p.kind, p.option, p.via));
@@ -668,7 +667,7 @@
     // questions: a dot and up to three lines of the question
     for (const kind of kinds) {
       if (!kind.revealed) continue;
-      if (kind.special) { // the Invalid dot: red, with how many calls Jev rejected
+      if (kind.special) { // the Invalid dot: red, with how many calls Laya rejected
         const hot = heat(kind, now), [ix, iy] = dot(kind), r = kind.r * (0.6 + 0.4 * presence(kind)) * ease(born(kind)) * (1 + 0.22 * ease(hot));
         ctx.globalAlpha = alpha(kind, kind) * (0.6 + 0.4 * hot); ctx.fillStyle = colors.red; ctx.beginPath(); ctx.arc(ix, iy, r, 0, TAU); ctx.fill();
         ctx.font = `600 ${(9.5 * r) / INVALID_R}px ${colors.body}`; ctx.fillStyle = colors.paper; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(kind.count), ix, iy + 0.5);
@@ -711,7 +710,7 @@
       ctx.beginPath(); ctx.arc(px, py, p.r + ease(t) * 18, 0, TAU); ctx.stroke();
     }
     ctx.globalAlpha = 1;
-    // Jev, above the calls flying in and out of it
+    // Laya, above the calls flying in and out of it
     const since = Math.max(0, now - flash), breathe = (Math.sin(now / 900) + 1) / 2;
     const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, 34 + breathe * 6);
     halo.addColorStop(0, colors.glow); halo.addColorStop(1, "transparent");
@@ -719,10 +718,10 @@
     if (since < 700) { const t = since / 700; ctx.strokeStyle = colors.accent; ctx.globalAlpha = 1 - t; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, 10 + ease(t) * 34, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1; }
     ctx.fillStyle = colors.accent; ctx.beginPath(); ctx.arc(cx, cy, 8 + (since < 300 ? (1 - since / 300) * 3 : 0), 0, TAU); ctx.fill();
     ctx.font = `italic 300 15px ${colors.display}`; ctx.fillStyle = colors.ink; ctx.textAlign = "center"; ctx.textBaseline = "top";
-    ctx.fillText("Jev", cx, cy + 16);
+    ctx.fillText("Laya", cx, cy + 16);
     ctx.restore();
     if (hovered) card(hovered);
-    if (!empty.hidden) { empty.style.left = `${view.x + world.jev.x * view.k}px`; empty.style.top = `${view.y + world.jev.y * view.k + 56}px`; } // under the Jev dot
+    if (!empty.hidden) { empty.style.left = `${view.x + world.jev.x * view.k}px`; empty.style.top = `${view.y + world.jev.y * view.k + 56}px`; } // under the Laya dot
   }
 
   /** The hovered question, whole, on a card above everything else: right beside its dot, on the side its line comes
@@ -788,7 +787,7 @@
     world.arranged = null;
   }
   canvas.addEventListener("dblclick", () => { view.user = false; showToggles(); }); // back to fitting the whole map
-  // zoom in and out about the middle of the map; back to Jev, in the middle
+  // zoom in and out about the middle of the map; back to Laya, in the middle
   const middle = () => [(world.area.l + world.area.r) / 2, (world.area.t + world.area.b) / 2];
   function zoomBy(factor) {
     const [mx, my] = middle(), k = clamp(view.k * factor, 0.2, 4);
@@ -799,7 +798,7 @@
   $("#arrange").addEventListener("click", () => { for (const k of world.kinds.values()) delete k.pin; arrange(true); }); // tidy it all afresh, hand-moved questions too
   $("#zoom-out").addEventListener("click", () => zoomBy(0.8));
   $("#centre").addEventListener("click", () => { const [mx, my] = middle(); view.user = true; showToggles(); view.x = mx - world.jev.x * view.k; view.y = my - world.jev.y * view.k; });
-  // the layout menu's switches: traces (chains as branches, or everything straight off Jev), deduplicate, colours and auto zoom
+  // the layout menu's switches: traces (chains as branches, or everything straight off Laya), deduplicate, colours and auto zoom
   function showToggles() { for (const [id, on] of [["traces", data.traces], ["dedupe", data.dedupe], ["colours", data.colours], ["autozoom", !view.user]]) $(`#${id}`).setAttribute("aria-checked", String(on)); }
   $("#traces").addEventListener("click", () => { data.traces = !data.traces; remember("traces", data.traces); showToggles(); rebuild(); renderCorner(true); });
   $("#dedupe").addEventListener("click", () => { data.dedupe = !data.dedupe; remember("dedupe", data.dedupe); showToggles(); rebuild(); renderCorner(true); });
@@ -817,16 +816,16 @@
     hover = nodeAt(...toWorld(event.clientX, event.clientY));
     canvas.style.cursor = hover?.kind === "question" ? "grab" : hover ? "pointer" : "default";
     if (!hover || hover.kind === "question") return hideTip(); // a hovered question shows itself whole on the map
-    if (hover.kind === "invalid") showTip(event.clientX, event.clientY, h("b", {}, "Invalid"), ` · ${plural(hover.node.count, "call")} Jev rejected`, h("div", { class: "sub" }, "Click to see them"));
-    else if (hover.kind === "jev") showTip(event.clientX, event.clientY, h("b", {}, "Jev"), h("div", { class: "sub" }, `${plural(data.records.filter(visible).length, "call")} so far`));
-    else { const o = hover.node, called = nameOf(o.kind.run, o.kind.name, o.name); showTip(event.clientX, event.clientY, h("b", {}, called), ` · chosen ${plural(o.count, "time")}`, h("div", { class: "sub" }, `${called === human(o.name) ? "" : `Its key is ${o.name}. `}${typeof o.latest === "number" ? `Jev's latest probability ${pct(o.latest)}. ` : ""}${o.count ? "Click for the calls behind it" : ""}`)); }
+    if (hover.kind === "invalid") showTip(event.clientX, event.clientY, h("b", {}, "Invalid"), ` · ${plural(hover.node.count, "call")} Laya rejected`, h("div", { class: "sub" }, "Click to see them"));
+    else if (hover.kind === "jev") showTip(event.clientX, event.clientY, h("b", {}, "Laya"), h("div", { class: "sub" }, `${plural(data.records.filter(visible).length, "call")} so far`));
+    else { const o = hover.node, called = nameOf(o.kind.run, o.kind.name, o.name); showTip(event.clientX, event.clientY, h("b", {}, called), ` · chosen ${plural(o.count, "time")}`, h("div", { class: "sub" }, `${called === human(o.name) ? "" : `Its key is ${o.name}. `}${typeof o.latest === "number" ? `Laya's latest probability ${pct(o.latest)}. ` : ""}${o.count ? "Click for the calls behind it" : ""}`)); }
   });
   canvas.addEventListener("pointerleave", () => { hover = null; hideTip(); });
   canvas.addEventListener("click", (event) => {
     if (drag?.moved) return; // the end of a pan, not a click
     const hit = nodeAt(...toWorld(event.clientX, event.clientY));
     if (!hit) { if (drawer.classList.contains("open")) closeDrawer(); else focus(null); return; }
-    if (hit.kind === "invalid") openList("Invalid calls", "Calls Jev rejected, newest first", [...hit.node.ids].reverse());
+    if (hit.kind === "invalid") openList("Invalid calls", "Calls Laya rejected, newest first", [...hit.node.ids].reverse());
     else if (hit.kind === "answer") openList(nameOf(hit.node.kind.run, hit.node.kind.name, hit.node.name), `${plural(hit.node.count, "time")} the answer to: ${hit.node.kind.asks || human(hit.node.kind.name)}`, [...hit.node.ids].reverse());
     else if (hit.kind === "question") { if (hit.node.pin) release(hit.node); else focus(hit.node.key); } // moved by hand: a click puts it back
     else { data.tab = "recent"; data.focus = null; renderCorner(true); }
@@ -885,10 +884,10 @@
       h("p", { class: "stats-meta" }, `Asked ${plural(rows.length, "time")} · last ${ago(finished(rows.at(-1).record))} · median ${seconds(median(calls.map((c) => c.elapsedMs)))} per call`)];
     const byAnswer = (option) => rows.filter((r) => landing(r.q) === option).map((r) => r.record.id);
     const confidence = rows.map((r) => r.q.confidence).filter((c) => typeof c === "number");
-    const confidenceBlock = confidence.length ? [h("p", { class: "chart-label" }, `Jev's confidence · median ${pct(median(confidence))}`), histogram(bins(confidence, 10, 0, 1), (i) => `${i * 10}–${i * 10 + 10}%`), h("div", { class: "axis" }, h("span", {}, "0%"), h("span", {}, "100%"))] : [];
+    const confidenceBlock = confidence.length ? [h("p", { class: "chart-label" }, `Laya's confidence · median ${pct(median(confidence))}`), histogram(bins(confidence, 10, 0, 1), (i) => `${i * 10}–${i * 10 + 10}%`), h("div", { class: "axis" }, h("span", {}, "0%"), h("span", {}, "100%"))] : [];
     if (latest.type === "noul") {
       const p = rows.map((r) => r.q.noul), yes = p.filter((v) => v >= 0.5).length;
-      return [head, h("p", { class: "chart-label" }, `Jev's probability of yes · mean ${pct(p.reduce((a, b) => a + b, 0) / p.length)}`),
+      return [head, h("p", { class: "chart-label" }, `Laya's probability of yes · mean ${pct(p.reduce((a, b) => a + b, 0) / p.length)}`),
         histogram(bins(p, 10, 0, 1), (i) => `${i * 10}–${i * 10 + 10}% yes`), h("div", { class: "axis" }, h("span", {}, "0%, no"), h("span", {}, "100%, yes")),
         h("div", { class: "shares" }, share("yes", yes, p.length, byAnswer("yes"), "above 50%"), share("no", p.length - yes, p.length, byAnswer("no"), "below 50%"))];
     }
@@ -914,7 +913,7 @@
     return h("li", { "data-id": record.id, class: data.selected?.id === record.id ? "here" : "" }, h("button", { onclick: () => openCall(record.id) },
       h("span", { class: "what" }, h("span", { class: `mark-dot${failed(record) ? " failed" : ""}` }), h("span", {}, headline(record))),
       h("span", { class: "when", "data-at": finished(record) }, ago(finished(record))),
-      h("span", { class: "sub" }, failed(record) ? "Jev rejected the call" : [q ? answerWords(q, record) : "no answer", ...record.questions.filter((item) => item !== q).slice(0, 2).map((item) => answerWords(item, record))].join(" · ") + (record.questions.length > 3 ? ` · +${record.questions.length - 3}` : ""))));
+      h("span", { class: "sub" }, failed(record) ? "Laya rejected the call" : [q ? answerWords(q, record) : "no answer", ...record.questions.filter((item) => item !== q).slice(0, 2).map((item) => answerWords(item, record))].join(" · ") + (record.questions.length > 3 ? ` · +${record.questions.length - 3}` : ""))));
   }
   /** New calls pile onto the top of the recent list without redrawing the rows already there. */
   function pileUp(records) {
@@ -927,7 +926,7 @@
     corner.querySelector("#n-recent").textContent = shown.length.toLocaleString();
     corner.querySelector("#totals").textContent = totals(shown);
   }
-  const totals = (shown) => `${plural(shown.length, "call")} · median ${seconds(median(shown.map((r) => r.elapsedMs)))} · ${money(shown.reduce((sum, r) => sum + (r.cost || 0), 0))}`;
+  const totals = (shown) => `${plural(shown.length, "call")} · median ${seconds(median(shown.map((r) => r.elapsedMs)))}`;
   let cornerKey = "";
   function renderCorner(force = false) {
     const shown = data.records.filter(visible), labels = [...new Set(data.records.map((r) => r.label))];
@@ -972,7 +971,7 @@
     const when = new Date(at), today = when.toDateString() === new Date().toDateString();
     return today ? when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : when.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   }
-  function headline(record) { const first = record.questions[0]; return first ? clip(questionOf(first), 110) : "A call Jev could not read"; }
+  function headline(record) { const first = record.questions[0]; return first ? clip(questionOf(first), 110) : "A call Laya could not read"; }
   function brief(record) {
     const q = record.questions.find((item) => landing(item) !== null);
     if (failed(record) || !q) return [h("span", { class: "mark-dot failed" }), h("span", {}, clip(headline(record), 58), " ", h("b", {}, failed(record) ? "→ failed" : "→ no answer"))];
@@ -1012,14 +1011,14 @@
       const called = (key) => labelIn(question.criteria?.[key], field) ?? human(key);
       // an option that is a whole object is described by its description, if it has one, not by its JSON
       const described = (value) => (value && typeof value === "object" && typeof value.description === "string" ? value.description : value);
-      parts.push(h("p", { class: "a" }, answer.choice === "none" ? "None of the options" : called(answer.choice)), meter(answer.confidence, `Jev's confidence ${pct(answer.confidence)}`),
+      parts.push(h("p", { class: "a" }, answer.choice === "none" ? "None of the options" : called(answer.choice)), meter(answer.confidence, `Laya's confidence ${pct(answer.confidence)}`),
         options(Object.entries(question.criteria || {}).map(([name, description]) => ({ name: called(name), description: described(description), p: answer.probabilities?.[name], chosen: name === answer.choice }))));
     } else if (type === "noul") {
-      parts.push(h("p", { class: "a" }, `${pct(answer.noul)} yes`), meter(answer.noul, "Jev's probability that the answer is yes"),
+      parts.push(h("p", { class: "a" }, `${pct(answer.noul)} yes`), meter(answer.noul, "Laya's probability that the answer is yes"),
         question.criteria ? options([{ name: "Yes", description: question.criteria.true, p: answer.noul, chosen: answer.noul >= 0.5 }, { name: "No", description: question.criteria.false, p: 1 - answer.noul, chosen: answer.noul < 0.5 }]) : null);
     } else if (type === "score") {
       const levels = question.criteria || [], near = Math.round(answer.score);
-      parts.push(h("p", { class: "a" }, text(levels[near] ?? `Level ${near}`)), meter(levels.length > 1 ? answer.score / (levels.length - 1) : 0, `Score ${Number(answer.score).toFixed(2)} of ${Math.max(0, levels.length - 1)} · Jev's confidence ${pct(answer.confidence)}`),
+      parts.push(h("p", { class: "a" }, text(levels[near] ?? `Level ${near}`)), meter(levels.length > 1 ? answer.score / (levels.length - 1) : 0, `Score ${Number(answer.score).toFixed(2)} of ${Math.max(0, levels.length - 1)} · Laya's confidence ${pct(answer.confidence)}`),
         options(levels.map((description, i) => ({ name: `Level ${i}`, level: true, description, p: answer.probabilities?.[String(i)], chosen: i === near }))));
     } else parts.push(h("pre", { class: "raw" }, JSON.stringify(answer, null, 2)));
     return block(parts);
@@ -1079,10 +1078,10 @@
     } }, "View state");
     state.hidden = true;
     openDrawer(
-      h("p", { class: "d-meta" }, [clock(record.at), `answered in ${seconds(record.elapsedMs)}`, typeof record.cost === "number" ? money(record.cost) : null].filter(Boolean).join(" · ")),
+      h("p", { class: "d-meta" }, [clock(record.at), `answered in ${seconds(record.elapsedMs)}`].join(" · ")),
       h("div", { class: "d-head" }, h("h2", { class: "d-title" }, alone && record.questions[0] ? questionOf(record.questions[0]) : entries.length ? `${entries.length} questions in one call` : headline(record)), viewState),
       state,
-      errorText ? h("div", { class: "notice" }, `Jev did not answer: ${text(errorText)}`) : null,
+      errorText ? h("div", { class: "notice" }, `Laya did not answer: ${text(errorText)}`) : null,
       entries.map(([qid, question], i) => answerBlock(question, answers[qid], alone, i + 1, fieldFor(record, qid) ?? fields.get(scopeOf(record.label, kindOf(qid))))),
       chainLinks(record),
       h("div", { class: "actions" },
@@ -1090,15 +1089,15 @@
           h("dt", {}, "Call"), h("dd", {}, String(id)),
           h("dt", {}, "Run label"), h("dd", {}, record.label || "none"),
           h("dt", {}, "Model"), h("dd", {}, record.answeredBy && record.answeredBy !== record.model ? `${record.model} → ${record.answeredBy}` : record.model ?? "–"),
-          h("dt", {}, "Input"), h("dd", {}, record.inputTokens === null ? "–" : `${record.inputTokens.toLocaleString()} tokens · ${money(record.cost)}`),
+          h("dt", {}, "Input"), h("dd", {}, record.inputTokens === null ? "–" : `${record.inputTokens.toLocaleString()} tokens`),
           h("dt", {}, "Time"), h("dd", {}, `${new Date(record.at).toLocaleString()} · ${(record.elapsedMs / 1000).toFixed(2)} s`),
           h("dt", {}, "Size"), h("dd", {}, `${(record.bytes / 1024).toFixed(1)} KiB sent`),
           h("dt", {}, "Status"), h("dd", {}, String(record.status)),
           h("dt", {}, "Trigger"), h("dd", { class: "mono" }, record.trigger ?? "none"),
           h("dt", {}, "Event ids"), h("dd", { class: "mono" }, record.questions.map((q) => eventOf(record, q)).join(", ") || "–"),
-          h("dt", {}, "Cache key"), h("dd", { class: "mono", title: "The sha256 of the exact body sent to Jev: the same request always has the same key" }, record.key))),
-        toggle("Raw", () => [h("p", { class: "eyebrow" }, "Sent to Jev"), h("pre", { class: "raw" }, JSON.stringify(full.request, null, 2)), copy(JSON.stringify(full.request, null, 2), "Copy request"),
-          h("p", { class: "eyebrow", style: "margin-top:16px" }, "Returned by Jev"), h("pre", { class: "raw" }, JSON.stringify(full.response, null, 2)), copy(JSON.stringify(full.response, null, 2), "Copy response")])),
+          h("dt", {}, "Cache key"), h("dd", { class: "mono", title: "The sha256 of the exact body sent to Laya: the same request always has the same key" }, record.key))),
+        toggle("Raw", () => [h("p", { class: "eyebrow" }, "Sent to Laya"), h("pre", { class: "raw" }, JSON.stringify(full.request, null, 2)), copy(JSON.stringify(full.request, null, 2), "Copy request"),
+          h("p", { class: "eyebrow", style: "margin-top:16px" }, "Returned by Laya"), h("pre", { class: "raw" }, JSON.stringify(full.response, null, 2)), copy(JSON.stringify(full.response, null, 2), "Copy response")])),
       panel);
   }
 
@@ -1106,18 +1105,16 @@
   function about() {
     const m = data.meta; if (!m) return;
     $("#run-line").textContent = `${location.origin}/v1/systemone`;
-    $("#about-facts").replaceChildren(h("span", {}, "Each call is saved whole, what was asked and what Jev answered, in a database ", h("span", { class: "hint", "data-tip": m.database }, "on this computer"), "."));
-    $("#nokey").hidden = !!m.keyed;
+    $("#about-facts").replaceChildren(h("span", {}, "Each call is saved whole, what was asked and what Laya answered, in a database ", h("span", { class: "hint", "data-tip": m.database }, "on this computer"), "."));
     $("#empty").hidden = data.records.length > 0;
   }
-  // one popover at a time: how to use, the Jev key, or the layout menu
-  const POPOVERS = [["#about", "#about-panel"], ["#settings", "#settings-panel"], ["#layout", "#layout-panel"]];
+  // one popover at a time: how to use, or the layout menu
+  const POPOVERS = [["#about", "#about-panel"], ["#layout", "#layout-panel"]];
   function closePopovers() { for (const [b, p] of POPOVERS) { $(p).hidden = true; $(b).setAttribute("aria-expanded", "false"); } }
   function popover(button, panel) {
     const open = $(panel).hidden;
     closePopovers();
     $(panel).hidden = !open; $(button).setAttribute("aria-expanded", String(open));
-    if (open && panel === "#settings-panel") loadSettings();
   }
   addEventListener("pointerdown", (event) => { if (!POPOVERS.some(([b, p]) => $(b).contains(event.target) || $(p).contains(event.target))) closePopovers(); }); // a press anywhere else closes them
   $("#about").addEventListener("click", () => popover("#about", "#about-panel"));
@@ -1129,27 +1126,6 @@
     el.addEventListener("pointerleave", (event) => { if (event.pointerType !== "mouse") return; clearTimeout(layoutClose); layoutClose = setTimeout(() => { if (layoutOpen()) popover("#layout", "#layout-panel"); }, 300); });
   }
   $("#layout").addEventListener("click", (event) => { if (event.pointerType !== "mouse") popover("#layout", "#layout-panel"); });
-  $("#settings").addEventListener("click", () => popover("#settings", "#settings-panel"));
-  $("#nokey").addEventListener("click", () => { if ($("#settings-panel").hidden) popover("#settings", "#settings-panel"); $("#key-input").focus(); });
-
-  // ---------- settings: the Jev key ----------
-  /** A key that is set shows in the field itself, masked but for its ending; pasting another replaces it. */
-  function showSettings(view) {
-    const { set, ending } = view.jevKey;
-    $("#key-state").hidden = set;
-    $("#nokey").hidden = set;
-    $("#key-input").placeholder = set ? `*******${ending}` : "Paste a TypeSafe API key";
-    $("#key-input").setAttribute("aria-label", set ? `TypeSafe API key, set, ending ${ending}` : "TypeSafe API key"); // a placeholder is not reliably read out
-  }
-  async function loadSettings() { try { showSettings(await (await fetch("/_/api/settings")).json()); } catch { /* the proxy is down; the pulse says so */ } }
-  async function saveSettings(jevKey) {
-    const error = $("#key-error"); error.hidden = true;
-    const response = await fetch("/_/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jevKey }) });
-    const value = await response.json().catch(() => ({}));
-    if (!response.ok) { error.textContent = value.error ?? "The key could not be saved."; error.hidden = false; return; }
-    $("#key-input").value = ""; showSettings(value);
-  }
-  $("#key-form").addEventListener("submit", (event) => { event.preventDefault(); const key = $("#key-input").value.trim(); if (key) saveSettings(key); });
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-copy]");
     if (button) navigator.clipboard.writeText($("#" + button.dataset.copy).textContent).then(() => { button.textContent = "Copied"; setTimeout(() => (button.textContent = "Copy"), 1200); });
@@ -1192,7 +1168,7 @@
       else if (fresh.length) { arrive(fresh); pileUp(fresh); renderCorner(); }
       fresh = [];
       about();
-      // the first visit in this browser opens on what Jeview is and how to use it
+      // the first visit in this browser opens on what Layaview is and how to use it
       if (first && !remembered("welcomed", false) && $("#about-panel").hidden && !drawer.classList.contains("open")) { remember("welcomed", true); popover("#about", "#about-panel"); } // not over a call a link opened: next time
       $("#pulse").className = "pulse on"; $("#pulse").dataset.tip = "Live";
     } catch { $("#pulse").className = "pulse"; $("#pulse").dataset.tip = "The proxy is not answering"; }

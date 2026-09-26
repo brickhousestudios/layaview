@@ -1,92 +1,93 @@
-# Jeview
+# Layaview
 
-> Agents: [llms.txt](llms.txt) says how to use a running Jeview, and [AGENTS.md](AGENTS.md) how to work on this repository.
+Layaview is a local-first live visualizer for **Laya** decision-model calls. It is a BrickHouse fork of [Jeview](https://github.com/andududu/jeview), preserving Jeview's event graph, local SQLite history, search, labels, and trigger-chain visualization while replacing TypeSafe Jev with a local Laya backend.
 
-An unofficial local visualizer for Jev ([TypeSafe](https://typesafe.ai) System One): a live view of every call your code
-makes. Jeview is an independent project. It is not affiliated with TypeSafe AI, nor made or endorsed by it.
-
+```text
+your code
+    ↓
+Layaview 127.0.0.1:4777
+    ↓
+local Laya adapter 127.0.0.1:4778
+    ↓
+Laya typed-decisions model
 ```
-your code  →  Jeview (127.0.0.1:4777)  →  TypeSafe (api.typesafe.ai)
-```
 
-Jeview is a gateway: it sits between your code and TypeSafe and answers nothing itself. Point your Jev client at
-Jeview instead of TypeSafe. Jeview sends each request on to Jev with your key, hands Jev's answer back, keeps every
-call in a local SQLite database, and draws the calls on a live map as they happen.
+The fork started from Jeview commit `495a4e43e9d67e495a66ab0d9e55ac1c5c4040d6`. The original MIT license and attribution are preserved. See [UPSTREAM.md](UPSTREAM.md).
 
-![A made-up support inbox that Jev triages, beside Jeview drawing each call as it happens](docs/side-by-side.png)
+## What Layaview does
+
+A client sends a System One-shaped body `{ model, state, questions }`. Layaview forwards the exact body to the configured Laya adapter, returns Laya's answer, adds one event id per answer, stores the call in a local SQLite database, and draws the decisions live.
+
+Laya inference remains a separate process. Layaview owns visualization, history, event ids, labels, search, and trigger relationships; the Python adapter owns model loading and inference.
 
 ## Run it
 
-Needs Node 24 or later, and nothing else: Jeview has no dependencies to install.
+Layaview needs Node 24 or later. The included adapter needs a Python environment with Laya and a CPU-compatible PyTorch install. See [adapter/README.md](adapter/README.md).
+
+On the Lenovo BrickHouse node, the launcher can reuse the existing Laya environment:
 
 ```sh
-./launch.sh
+./scripts/run-layaview.sh
 ```
 
-That finds a suitable Node (on your PATH, or installed by nvm or Homebrew), starts Jeview and opens the viewer at
-http://127.0.0.1:4777/ (or http://jeview.localhost:4777/, a name your browser already knows). `npm start` does the same
-without opening a browser. Add your TypeSafe API key (the key icon,
-top right). The first time you open it, the viewer explains itself.
+This starts:
 
-## See it working
+- Laya adapter: `http://127.0.0.1:4778/v1/systemone`
+- Layaview: `http://127.0.0.1:4777/`
 
-Two demos send real Jev calls through Jeview. Run one in a second terminal and put its window beside Jeview's. Each
-plays only while its page is open, costs about ten cents an hour while it does, and stops with Ctrl-C.
+The launcher waits for `/healthz` before starting Layaview and stops the adapter when Layaview exits.
 
-- `npm run demo`, then open http://127.0.0.1:4781/: Jev plays Pixel Knight, a tiny side-scroller, deciding every move.
-- `npm run demo:support`, then open http://127.0.0.1:4782/: Jev triages a made-up support inbox, deciding what each
-  message is about, how urgent it is, which team takes it and whether to offer a credit.
+To run only the viewer against an already-running adapter:
 
-## Send requests to it
+```sh
+./launch.sh --laya-endpoint http://127.0.0.1:4778/v1/systemone
+```
 
-Send Jev requests to `http://127.0.0.1:4777/v1/systemone` instead of `https://api.typesafe.ai/v1/systemone`: the same
-requests and the same answers, with no key needed from the caller.
+## Send decisions through it
 
-- **Group requests** under a project or label by adding it to the path: `http://127.0.0.1:4777/my-project/v1/systemone`.
-  The viewer can then show one group at a time.
-- **Link calls.** Every answer comes back with an event id in `events`. When a later request follows from one of
-  those answers, send its event id in a `Jeview-Trigger` header, and the map grows that request off the answer.
-  Jeview drops its own headers before calling Jev and sends the body on unchanged.
-- **Show names, not keys.** The map labels each answer with its option's key, such as `c14`. When the criteria behind
-  the keys are objects, a `Jeview-Display` header says which part to show instead: `Jeview-Display: name`, or a field
-  per question, `Jeview-Display: category=name, kind=title`. An option without that field keeps its key, and so does
-  everything sent without the header. The header is only for show: one that cannot be read is ignored, never refused.
+POST to `http://127.0.0.1:4777/v1/systemone`. Group calls into a run by putting a label before the path, for example `http://127.0.0.1:4777/mythos-5/v1/systemone`.
 
-Agents can read `http://127.0.0.1:4777/llms.txt`: a running Jeview serves it with its own address and whether a key is
-set. [llms.txt](llms.txt) here is the same text, for the default address.
+Every answer comes back with an event id in `events`. When a later call follows from one answer, send that event id with `Layaview-Trigger: <event id>`. The new call then grows from that answer in the live map.
+
+`Layaview-Display` can select a display field from structured choice criteria. Legacy `Jeview-Trigger` and `Jeview-Display` headers remain accepted for upstream compatibility, but neither spelling is forwarded to Laya.
+
+Agents and scripts can read `http://127.0.0.1:4777/llms.txt` for the live contract.
+
+## Local-only security model
+
+Layaview and the included adapter bind to `127.0.0.1` only by default. Layaview keeps Jeview's Host and Origin protections and strips caller authorization, cookies, origins, and its own control headers before forwarding a request.
+
+Calls are stored in `layaview.sqlite` under the selected data directory. The data directory is mode `0700` and the database is mode `0600`.
+
+There is no TypeSafe API-key requirement and no TypeSafe dollar-cost estimate. Layaview may display local input-token metadata if an adapter returns it, but it does not price local inference.
+
+Do not expose Layaview or the adapter on a public interface. Recorded calls may contain private state.
 
 ## Options
 
-Given to either launcher: `./launch.sh --port 4800`, or `npm start -- --port 4800`.
-
 - `--port 4777`
-- `--dir ~/.local/share/jeview`: where the database lives
-- `--jev-endpoint URL`: another Jev endpoint, such as a local mock
+- `--dir ~/.local/share/layaview`
+- `--laya-endpoint http://127.0.0.1:4778/v1/systemone`
 
-## Your data
+`--jev-endpoint` remains a compatibility alias for `--laya-endpoint`; do not use both at once.
 
-Nothing is stored anywhere but your own machine. Jeview runs locally, has no accounts and no tracking, and the only
-place it sends anything is TypeSafe, to make the calls you asked for.
+## Development
 
-Calls and your key are kept in `jeview.sqlite` in the data folder. The file is readable only by you, and the key is
-stored in it as plain text. To erase everything, key included, stop Jeview and delete `jeview.sqlite*` from that folder.
-
-A long history stays cheap: the viewer opens on the latest 20,000 calls, and search reaches the rest. Two Jeviews may
-share a data folder, for instance on two ports, and each shows the calls of both.
-
-Jeview listens on 127.0.0.1 only and has no login: anything running on your machine can read the recorded calls and
-send calls with your key. It refuses requests from web pages on other sites, so a page you visit cannot. Do not put it
-behind a public address.
-
-## Develop
+The Node viewer keeps Jeview's zero-runtime-dependency design.
 
 ```sh
-npm install # only the type checker
-npm test
+npm install
 npm run typecheck
-npm run check:pages # the viewer's and the demos' browser scripts parse
+npm run check:pages
+npm test
+python3 -m py_compile adapter/laya_server.py
+git diff --check
 ```
+
+When `llmsText` changes, run `npm run llms`.
+
+The ordinary Node test suite uses a stand-in Laya endpoint and never downloads or calls a model. Actual model acceptance is a separate runtime test against local Laya.
 
 ## License
 
-MIT
+MIT. Layaview is derived from Jeview; upstream provenance is documented in [UPSTREAM.md](UPSTREAM.md).
