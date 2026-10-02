@@ -91,3 +91,45 @@ The `feature/laya-native` branch already contains:
 - upstream provenance.
 
 This document is the durable continuation point if chat context is lost.
+
+
+## Real local Laya acceptance — 2026-10-02
+
+The first real-model canary passed on M4 with:
+
+- Python 3.11
+- `laya==0.3.14`
+- CPU PyTorch
+- model `convaiinnovations/laya-typed-decisions`
+- adapter on loopback `127.0.0.1:4778`
+- LayaView on loopback `127.0.0.1:4777`
+
+The representative request described an agent claiming deployment success while the health endpoint returned HTTP 503 and no artifact checksum existed. Two typed questions were sent through LayaView: one `choice` assessment and one severity `score`.
+
+The real model returned structured answers with option distributions. For the assessment it selected `verified_success` with probability `0.51`, while `unsupported_success_claim` was `0.2376` and `ordinary_failure` was `0.2524`. The model-reported confidence was low (`0.0603`). This is **not** treated as a correctness pass for the model. It is evidence that LayaView preserves and exposes the model's actual decision rather than rewriting an inconvenient result.
+
+Laya 0.3.14 also warned that this checkpoint contains at least one out-of-range temperature entry which it clamps; confidence for the affected bucket must therefore be treated as uncalibrated. LayaView must preserve that uncertainty rather than presenting confidence as stronger than the model/runtime supports.
+
+The end-to-end path was proven:
+
+```text
+real input
+  -> LayaView
+  -> local Laya adapter
+  -> convaiinnovations/laya-typed-decisions
+  -> structured choice + score distributions
+  -> LayaView event IDs
+  -> private SQLite persistence
+  -> /_/api/records readback
+  -> viewer root 200
+```
+
+The persisted record retained the exact source request and the raw model response. The data directory was mode `0700` and the SQLite file was `0600`.
+
+Re-run this explicit acceptance without adding model inference to the ordinary unit suite:
+
+```sh
+npm run acceptance:laya
+```
+
+The canary validates the local inference/persistence/readback plumbing. It does not certify Laya's semantic accuracy on the example.
