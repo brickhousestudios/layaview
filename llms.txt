@@ -1,52 +1,46 @@
-# Jeview
+# Layaview
 
-An unofficial local visualizer for Jev (TypeSafe System One) at http://127.0.0.1:4777, with a live view of every call at http://127.0.0.1:4777/
-It is a gateway, not a model: it sits between a Jev client and TypeSafe and answers nothing itself. Each request it
-receives goes on to Jev with the Jev key set in the viewer, Jev's answer goes back to the caller, and the call is kept
-whole (what was asked, what Jev saw, what it answered) in a SQLite database on this machine. Nothing is stored anywhere
-else: Jeview runs locally, and TypeSafe is the only place it sends anything.
+A local visualizer for Laya decisions at http://127.0.0.1:4777, with a live view of every call at http://127.0.0.1:4777/
+Layaview is a gateway, not a model: it sits between a System One-shaped client and a local Laya adapter. Each request
+goes to that adapter, Laya's answer goes back to the caller, and the call is kept whole (what was asked, what Laya
+answered) in a SQLite database on this machine. By default both Layaview and the Laya adapter stay on loopback.
 
-The Jev key: not set yet, so calls are refused. Set it in the viewer at http://127.0.0.1:4777/ (the key icon, top right).
+## Send Laya decision requests here
 
-## Send Jev requests here
-
-Use http://127.0.0.1:4777/v1/systemone wherever you would use https://api.typesafe.ai/v1/systemone: the same body
-{ model, state, questions }, the same answers. No key is needed from the caller. To group requests under a project or
-label, add it to the path: http://127.0.0.1:4777/<label>/v1/systemone.
+Send http://127.0.0.1:4777/v1/systemone a JSON body { model, state, questions }. To group requests under a project or label, add it
+to the path: http://127.0.0.1:4777/<label>/v1/systemone.
 
 ## Link a question to the answer that led to it
 
-Every answer comes back with an event id, in "events" beside the answers: { "<question id>": "<call>:<question id>" }.
-When a later request follows from one of those answers, send its event id in a header: Jeview-Trigger: <event id>.
-The viewer then grows that request's questions as a branch off the answer that triggered them. Jeview drops its own
-headers before calling Jev, and sends the body on exactly as it came.
+Every answer comes back with an event id in "events": { "<question id>": "<call>:<question id>" }.
+When a later request follows from one of those answers, send its event id in a header:
+Layaview-Trigger: <event id>.
+The viewer grows that request's questions as a branch off the answer that triggered them. Layaview strips both
+Layaview-* headers and legacy Jeview-* aliases before calling Laya, and sends the body on exactly as it came.
 
 ## Show an option by its name, not its key
 
-The viewer labels each answer with the option's key, such as "c14". When the criteria behind the keys are objects, a
-header says which part to show instead: Jeview-Display: name, or a field per question: Jeview-Display: category=name,
-kind=title. A field may be a path, such as meta.title. An option without that field keeps its key, and a header that
-cannot be read is ignored: it never stops a call.
+The viewer labels each answer with the option's key, such as "c14". When the criteria behind the keys are objects, use
+Layaview-Display: name, or a field per question: Layaview-Display: category=name, kind=title. A field may be a path,
+such as meta.title. Legacy Jeview-Display remains accepted as a compatibility alias.
 
 ## When a call is refused
 
-Whatever Jev answers, a refusal included, comes back as Jev sent it. Jeview's own refusals are JSON, { "error": "..." }:
+Whatever the Laya adapter answers, a refusal included, comes back to the caller. Layaview's own refusals are JSON,
+{ "error": "..." }:
 
-- 401: no Jev key is set.
-- 400: a Jeview-Trigger that is empty or longer than 200 characters.
+- 400: a Layaview-Trigger that is empty or longer than 200 characters.
 - 413: a body over 16 MB.
-- 502: Jev could not be reached, or its answer was cut short.
-- 403: the request came from a web page on another site. Jeview serves programs on this machine, not pages elsewhere.
+- 502: Laya could not be reached, or its answer was cut short.
+- 403: the request came from a web page on another site. Layaview serves programs on this machine, not pages elsewhere.
 
-What Jev answered or refused is recorded, and so are the 401s and 502s. The 400s, 413s and 403s are not.
+Laya's answers and refusals are recorded, and so are 502s. The 400s, 413s and 403s are not.
 
 ## Read what was recorded (JSON, from this machine only)
 
-- GET http://127.0.0.1:4777/_/api/records?since=<n>: summaries in the order calls finished, at most 5,000 at a time; "cursor" is
-  the next "since", and "more" says the next page is already there. ?latest=<n> starts at the latest n calls instead.
-- GET http://127.0.0.1:4777/_/api/records?ids=<id>,<id>: the summaries of those calls, at most 1,000.
-- GET http://127.0.0.1:4777/_/api/records/<id>: one call, the request sent to Jev and the response it returned.
-- GET http://127.0.0.1:4777/_/api/search?q=<words>: the ids of the calls whose label, trigger, request or response contains every
-  word, newest first, at most 1,000.
+- GET http://127.0.0.1:4777/_/api/records?since=<n>: summaries in the order calls finished, at most 5,000 at a time.
+- GET http://127.0.0.1:4777/_/api/records?ids=<id>,<id>: summaries of named calls, at most 1,000.
+- GET http://127.0.0.1:4777/_/api/records/<id>: one call, the request sent to Laya and the response it returned.
+- GET http://127.0.0.1:4777/_/api/search?q=<words>: ids of calls whose label, trigger, request or response contains every word.
 
-A record's "key" is the sha256 of the exact body sent to Jev.
+A record's "key" is the sha256 of the exact body sent to Laya.

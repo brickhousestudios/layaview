@@ -1,15 +1,15 @@
-// Support Desk: a made-up support inbox that Jev triages through Jeview, drawn live in the browser.
+// Support Desk: a made-up support inbox that Laya triages through Layaview, drawn live in the browser.
 //
 //   node demo/support-desk.ts [--port 4782] [--proxy http://127.0.0.1:4777] [--label support-desk] [--pace 2600] [--fail 0.03]
 //
-// Open http://127.0.0.1:4782/ to watch. Made-up customers write in, one every --pace milliseconds or so. Jev reads each
+// Open http://127.0.0.1:4782/ to watch. Made-up customers write in, one every --pace milliseconds or so. Laya reads each
 // message once (what it is about, how urgent, is the customer upset, could a help article answer it), and some answers
-// lead on to more questions, each sent with a Jeview-Trigger header naming the answer that led to it: the topic decides
-// which team takes it, a topic Jev was unsure of is read again with the customer's account beside it, an upset customer
+// lead on to more questions, each sent with a Layaview-Trigger header naming the answer that led to it: the topic decides
+// which team takes it, a topic Laya was unsure of is read again with the customer's account beside it, an upset customer
 // may be offered a credit, a message an article could answer gets the article, and one about nothing we do is checked
-// for spam. Now and then Jev is also asked whether the customer may leave or what language the message is in, and
-// --fail says how often a message also sends a call Jev rejects. Open Jeview beside it to watch Jev think. It runs only while a page is open,
-// and every call goes to the real Jev through Jeview (two to four a message, about ten cents an hour).
+// for spam. Now and then Laya is also asked whether the customer may leave or what language the message is in, and
+// --fail says how often a message also sends a call Laya rejects. Open Layaview beside it to watch Laya think. It runs only while a page is open,
+// and every call goes to the configured local Laya adapter through Layaview.
 import { readFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { parseArgs } from "node:util";
@@ -26,7 +26,7 @@ const { values } = parseArgs({
 const port = Number(values.port), proxy = values.proxy.replace(/\/+$/, ""), pace = Number(values.pace), failRate = Number(values.fail);
 const url = `${proxy}${values.label ? `/${encodeURIComponent(values.label)}` : ""}/v1/systemone`;
 
-// ---------- the questions Jev is asked ----------
+// ---------- the questions Laya is asked ----------
 const GUIDELINES = "We make Tally, invoicing software for small teams. Plans: Free, Pro and Team. Engineering takes anything broken: errors, crashes, data that is wrong or missing. Billing takes charges, refunds, invoices and plan changes. Product takes ideas and feature requests. Support takes how-to questions, account changes and everything else. A message is urgent when the customer cannot work or is losing money, and not urgent when it is an idea or a general question. Offer a credit only to a paying customer whom we let down: charged wrongly, or unable to work for a day or more. Never offer a credit to a Free customer, or for a feature we do not have.";
 const ARTICLES = { reset_password: "Reset your password", invite_teammates: "Invite teammates and set their roles", export_data: "Export invoices to CSV or PDF", change_plan: "Change or cancel your plan", connect_bank: "Connect a bank account", none: "none of these answers it" };
 const QUESTIONS = {
@@ -79,34 +79,34 @@ function incoming() {
   const [from, plan, message] = MESSAGES[next++ % MESSAGES.length]!;
   return { id: ++ids, from, plan, message, at: Date.now() };
 }
-/** What the desk knows about a customer, shown to Jev when it reads a message a second time. */
+/** What the desk knows about a customer, shown to Laya when it reads a message a second time. */
 const account = (plan: Plan) => ({ plan, paying: plan !== "Free", customer_for: `${1 + Math.floor(Math.random() * 30)} months`, open_tickets: Math.floor(Math.random() * 3) });
 
-// ---------- asking Jev ----------
+// ---------- asking Laya ----------
 type Answer = { choice?: string; confidence?: number; noul?: number; score?: number };
 type Reply = { answers: Record<string, Answer>; events: Record<string, string> };
-/** One call through Jeview; `trigger` is the event id of the answer it follows from. Null when Jev did not answer. */
+/** One call through Layaview; `trigger` is the event id of the answer it follows from. Null when Laya did not answer. */
 async function ask(state: unknown, questions: Record<string, unknown>, trigger?: string): Promise<Reply | null> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(trigger ? { "jeview-trigger": trigger } : {}) },
+    headers: { "content-type": "application/json", ...(trigger ? { "layaview-trigger": trigger } : {}) },
     body: JSON.stringify({ model: "jev-latest", state, questions }),
   });
   return response.ok ? (await response.json()) as Reply : null;
 }
 
-/** One message: Jev reads it, and what it answers leads on. The page hears of each decision as it is made. */
+/** One message: Laya reads it, and what it answers leads on. The page hears of each decision as it is made. */
 async function triage() {
   const ticket = incoming(), { id } = ticket, state = { support_guidelines: GUIDELINES, ticket: { from: ticket.from, plan: ticket.plan, message: ticket.message } };
   remember({ type: "ticket", ...ticket });
-  if (Math.random() < failRate) void ask(state, { mood_ring: { type: "maybe", instructions: "Is `ticket` a question type Jev knows?" } }).catch(() => null); // Jev rejects it
+  if (Math.random() < failRate) void ask(state, { mood_ring: { type: "maybe", instructions: "Is `ticket` a question type Laya knows?" } }).catch(() => null); // Laya rejects it
   const first = await ask(state, { topic: QUESTIONS.topic, urgency: QUESTIONS.urgency, upset: QUESTIONS.upset, self_serve: QUESTIONS.selfServe });
   if (!first) return false;
   const read = first.answers, upset = read.upset?.noul ?? 0, selfServe = read.self_serve?.noul ?? 0;
   let topic = read.topic?.choice ?? "other", from = first.events.topic;
   remember({ type: "read", id, topic, sure: read.topic?.confidence ?? null, urgency: read.urgency?.score ?? null, upset, selfServe });
   const after: Promise<unknown>[] = [];
-  // the topic decides the team; a topic Jev was unsure of is read again first, with the customer's account beside it
+  // the topic decides the team; a topic Laya was unsure of is read again first, with the customer's account beside it
   after.push((async () => {
     if ((read.topic?.confidence ?? 1) < 0.6) {
       const again = await ask({ ...state, account: account(ticket.plan) }, { topic_again: QUESTIONS.topicAgain }, from);
@@ -129,7 +129,7 @@ async function triage() {
     const article = reply?.answers.article?.choice;
     if (article && article !== "none") remember({ type: "article", id, article: ARTICLES[article as keyof typeof ARTICLES] ?? article });
   }));
-  // asked only now and then, so they fade from Jeview's map between visits
+  // asked only now and then, so they fade from Layaview's map between visits
   const roll = Math.random();
   if (roll < 0.1) after.push(ask(state, { churn: QUESTIONS.churn }).then((reply) => { const score = reply?.answers.churn?.score; if (typeof score === "number") remember({ type: "churn", id, score }); }));
   else if (roll < 0.17) after.push(ask(state, { language: QUESTIONS.language }).then((reply) => { const language = reply?.answers.language?.choice; if (language && language !== "english") remember({ type: "language", id, language }); }));
@@ -157,7 +157,7 @@ const server = createServer((req, res) => {
   res.writeHead(404).end();
 });
 server.on("error", (error: NodeJS.ErrnoException) => { console.error(error.code === "EADDRINUSE" ? `Port ${port} is already in use. If Support Desk is already running, open http://127.0.0.1:${port}/; otherwise start this one on another port: --port ${port + 1}` : `Support Desk could not start: ${error.message}`); process.exit(1); });
-server.listen(port, "127.0.0.1", () => console.log(`Support Desk: open http://127.0.0.1:${port}/ to watch Jev triage the inbox (through ${url}). Ctrl-C stops it.`));
+server.listen(port, "127.0.0.1", () => console.log(`Support Desk: open http://127.0.0.1:${port}/ to watch Laya triage the inbox (through ${url}). Ctrl-C stops it.`));
 process.on("SIGINT", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
 
@@ -165,8 +165,8 @@ process.on("SIGTERM", () => process.exit(0));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 for (;;) {
   if (!watchers.size) { await sleep(400); continue; }
-  // messages overlap, as in a real inbox: the next customer does not wait for Jev to finish with this one
-  void triage().then((answered) => { if (!answered) broadcast({ type: "waiting", reason: "Jev did not answer. Is a Jev key set in Jeview (the key icon, top right)?" }); })
-    .catch((error: Error) => broadcast({ type: "waiting", reason: `Jeview is not answering at ${proxy}: ${error.message}` }));
+  // messages overlap, as in a real inbox: the next customer does not wait for Laya to finish with this one
+  void triage().then((answered) => { if (!answered) broadcast({ type: "waiting", reason: "Laya did not answer. Is a Laya key set in Layaview (the key icon, top right)?" }); })
+    .catch((error: Error) => broadcast({ type: "waiting", reason: `Layaview is not answering at ${proxy}: ${error.message}` }));
   await sleep(pace * (0.7 + Math.random() * 0.6));
 }
