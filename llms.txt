@@ -10,6 +10,16 @@ answered) in a SQLite database on this machine. By default both Layaview and the
 Send http://127.0.0.1:4777/v1/systemone a JSON body { model, state, questions }. To group requests under a project or label, add it
 to the path: http://127.0.0.1:4777/<label>/v1/systemone.
 
+## Import transcript or history
+
+POST http://127.0.0.1:4777/_/api/ingest with { source, request, label?, trigger? }. source.kind must be "transcript" or "history" and
+may carry id, at, text and uri. request is the ordinary { model, state, questions } object. Layaview runs it through the
+same Laya adapter and persistence path as live traffic; it does not invent questions or answers from raw text.
+It imports structured items only: it does not automatically turn arbitrary transcripts into questions.
+
+Recorded summaries include layaview.decision-event.v1 events. model.observed contains only fields returned by Laya;
+derived contains viewer-computed landing, selected probability and uncertainty labels. Missing confidence stays missing.
+
 ## Link a question to the answer that led to it
 
 Every answer comes back with an event id in "events": { "<question id>": "<call>:<question id>" }.
@@ -41,6 +51,6 @@ Laya's answers and refusals are recorded, and so are 502s. The 400s, 413s and 40
 - GET http://127.0.0.1:4777/_/api/records?since=<n>: summaries in the order calls finished, at most 5,000 at a time.
 - GET http://127.0.0.1:4777/_/api/records?ids=<id>,<id>: summaries of named calls, at most 1,000.
 - GET http://127.0.0.1:4777/_/api/records/<id>: one call, the request sent to Laya and the response it returned.
-- GET http://127.0.0.1:4777/_/api/search?q=<words>: ids of calls whose label, trigger, request or response contains every word.
+- GET http://127.0.0.1:4777/_/api/search?q=<words>: ids of calls whose provenance, label, trigger, request or response contains every word.
 
 A record's "key" is the sha256 of the exact body sent to Laya.

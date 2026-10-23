@@ -66,7 +66,7 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(value["model"], "convaiinnovations/laya-typed-decisions")
         self.assertEqual(value["instance"], "test-instance-token")
 
-    def test_system_one_shape_and_derived_confidence(self):
+    def test_system_one_shape_preserves_observed_fields_without_derived_confidence(self):
         payload = json.dumps({
             "model": "laya-typed-decisions",
             "state": {"excerpt": "reviewed Mythos material"},
@@ -81,10 +81,19 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(fake_agent.calls), before + 1)
         self.assertEqual(value["answers"]["kind"]["choice"], "world_model_revision")
-        self.assertEqual(value["answers"]["kind"]["confidence"], 0.7)
-        self.assertEqual(value["answers"]["severity"]["confidence"], 0.7)
+        self.assertEqual(value["answers"]["kind"]["probabilities"]["world_model_revision"], 0.7)
+        self.assertNotIn("confidence", value["answers"]["kind"])
+        self.assertNotIn("confidence", value["answers"]["severity"])
         self.assertEqual(value["answers"]["aligned"]["noul"], 0.82)
+        self.assertEqual(value["runtime"]["calibration"], "unspecified")
         self.assertNotIn("usage", value)
+
+    def test_real_laya_temperature_warning_is_a_calibration_warning(self):
+        real = "laya: this checkpoint ships invalid temperatures or values outside [0.5, 5]; using choice:11+=0.10058280825614929 -> 0.5. Treat confidence from the affected entries as uncalibrated."
+        value = adapter.runtime_metadata([real])
+        self.assertEqual(value["calibration"], "warning")
+        self.assertEqual(value["warnings"], [real])
+        self.assertEqual(adapter.runtime_metadata(["some unrelated runtime note"])["calibration"], "unspecified")
 
     def test_foreign_page_cannot_trigger_inference(self):
         payload = json.dumps({"state": {}, "questions": {"kind": {"type": "choice", "criteria": {"a": "A"}}}}).encode()

@@ -179,33 +179,38 @@
     return node;
   }
   const refuse = (record, node) => { node.count++; node.ids.push(record.id); };
-  /** The answers a question can get, shown before Laya picks them: a choice's options (when there are few enough to
-   * read), yes and no, or a ranking's levels. A choice with many options shows only those Laya actually gives. */
+  /** Map only outcomes Laya actually returned: the chosen outcome plus alternatives carrying a supplied distribution. */
   function candidates(q) {
-    if (q.noul !== undefined || q.type === "noul") return ["yes", "no"];
-    if (q.score !== undefined || q.type === "score") return q.levels ? Array.from({ length: q.levels }, (_, i) => `level ${i}`) : [];
-    return q.options && q.options.length <= MAX_CANDIDATES ? q.options : [];
+    const chosen = landing(q), names = [];
+    if (q.probabilities) for (const [key, value] of Object.entries(q.probabilities)) if (typeof value === "number") names.push(q.score !== undefined ? `level ${key}` : key);
+    if (q.noul !== undefined) names.push("yes", "no");
+    if (chosen !== null) names.push(chosen);
+    return [...new Set(names)].slice(0, MAX_CANDIDATES);
   }
   function candidate(kind, name) {
     let answer = kind.options.get(name);
-    if (!answer) { answer = { name, kind, count: 0, ids: [], x: kind.x, y: kind.y, w: 0, h: 0, r: 0, revealed: false }; kind.options.set(name, answer); placeAnswer(answer); }
+    if (!answer) { answer = { name, kind, count: 0, ids: [], observedIds: [], derivedIds: [], x: kind.x, y: kind.y, w: 0, h: 0, r: 0, revealed: false }; kind.options.set(name, answer); placeAnswer(answer); }
     return answer;
   }
-  /** The probability Laya gave one answer in one call: every option of a choice or level of a ranking, both sides of a yes/no. */
+  /** A numeric probability and whether it came from model output or viewer arithmetic. */
   function probabilityOf(q, name) {
-    if (q.noul !== undefined) return name === "yes" ? q.noul : name === "no" ? 1 - q.noul : null;
+    if (q.noul !== undefined) return name === "yes" ? { value: q.noul, origin: "observed" } : name === "no" ? { value: 1 - q.noul, origin: "derived" } : null;
     const key = q.score !== undefined ? name.replace(/^level /, "") : name;
-    if (q.probabilities && typeof q.probabilities[key] === "number") return q.probabilities[key];
-    return name === landing(q) ? landedP(q) : null;
+    if (q.probabilities && typeof q.probabilities[key] === "number") return { value: q.probabilities[key], origin: "observed" };
+    return name === landing(q) && typeof q.p === "number" ? { value: q.p, origin: "derived" } : null;
   }
-  /** The probability Laya gave the answer it landed on (older records carry only the confidence). */
-  const landedP = (q) => q.p ?? (q.noul !== undefined ? Math.max(q.noul, 1 - q.noul) : q.confidence ?? null);
   /** A body appears when the ball reaches it; `born` times its growing in. */
   function reveal(body, now = performance.now()) { if (!body.revealed) { body.revealed = true; body.born = now; } }
   function land(record, target) {
     target.kind.count++; target.option.count++; target.option.ids.push(record.id); target.kind.asked.push({ q: target.q, record });
     target.kind.run = record.label; void learn(record, target.q);
-    for (const o of target.kind.options.values()) { const p = probabilityOf(target.q, o.name); if (p !== null) o.latest = p; } // the latest spread across every answer
+    for (const o of target.kind.options.values()) {
+      const probability = probabilityOf(target.q, o.name);
+      if (!probability) continue;
+      o.latest = probability.value; o.latestOrigin = probability.origin;
+      const ids = probability.origin === "observed" ? o.observedIds : o.derivedIds;
+      if (!ids.includes(record.id)) ids.push(record.id);
+    }
   }
   /** A new answer lights its dot up; it cools back over two seconds, whatever lands after it. */
   const bump = (option) => { option.hot = performance.now(); };
@@ -617,8 +622,10 @@
       else stroke([legsTo(kind).at(-1)]);
       for (const o of kind.options.values()) {
         if (!o.revealed) continue;
-        ctx.globalAlpha = alpha(o, kind) * (0.45 + 0.55 * heat(o, now)) * (hue ? 0.55 : 1); ctx.lineWidth = 0.8;
-        stroke([legs(kind, o).at(-1)]);
+        const alternative = o.count === 0, derivedAlternative = alternative && !o.observedIds.length && o.derivedIds.length;
+        ctx.setLineDash(alternative ? (derivedAlternative ? [1, 4] : [4, 4]) : []);
+        ctx.globalAlpha = alpha(o, kind) * (alternative ? 0.5 : 0.45 + 0.55 * heat(o, now)) * (hue ? 0.55 : 1); ctx.lineWidth = alternative ? 1 : 0.8;
+        stroke([legs(kind, o).at(-1)]); ctx.setLineDash([]);
       }
     }
     // a ball on its way to something new draws the line behind it
@@ -692,10 +699,13 @@
           aura.addColorStop(0, colors.aura); aura.addColorStop(1, "transparent");
           ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(ox, oy, r * 3, 0, TAU); ctx.fill();
         }
-        ctx.globalAlpha = alpha(o, kind) * (0.45 + 0.55 * hot);
-        ctx.fillStyle = tint(kind) ?? colors.ink; ctx.beginPath(); ctx.arc(ox, oy, r, 0, TAU); ctx.fill();
-        // the probability shrinks and grows with its dot
-        if (typeof o.latest === "number" && r > ANSWER_R * 0.45) { ctx.font = `600 ${(9.5 * r) / ANSWER_R}px ${colors.body}`; ctx.fillStyle = colors.paper; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(pct(o.latest), ox, oy + 0.5); }
+        const alternative = o.count === 0, derivedAlternative = alternative && !o.observedIds.length && o.derivedIds.length, answerTone = tint(kind) ?? colors.ink;
+        ctx.globalAlpha = alpha(o, kind) * (alternative ? 0.8 : 0.45 + 0.55 * hot);
+        ctx.beginPath(); ctx.arc(ox, oy, r, 0, TAU);
+        if (alternative) { ctx.fillStyle = colors.paper; ctx.fill(); ctx.strokeStyle = answerTone; ctx.lineWidth = 1.4; ctx.setLineDash(derivedAlternative ? [1, 3] : [3, 3]); ctx.stroke(); ctx.setLineDash([]); }
+        else { ctx.fillStyle = answerTone; ctx.fill(); }
+        // the probability shrinks and grows with its dot; hollow alternatives remain visibly distinct from the chosen path
+        if (typeof o.latest === "number" && r > ANSWER_R * 0.45) { ctx.font = `600 ${(9.5 * r) / ANSWER_R}px ${colors.body}`; ctx.fillStyle = alternative ? answerTone : colors.paper; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(pct(o.latest), ox, oy + 0.5); }
         ctx.globalAlpha = alpha(o, kind) * (0.7 + 0.3 * hot);
         ctx.font = `400 ${A_SIZE}px ${colors.body}`; ctx.fillStyle = lit.has(o) || hot > 0.5 ? colors.ink : colors.muted; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         plate(o.x, oy + o.R + 4 + 8 - 8, o.labelW, 16); write(o.label, o.x, oy + o.R + 4 + 8);
@@ -818,7 +828,12 @@
     if (!hover || hover.kind === "question") return hideTip(); // a hovered question shows itself whole on the map
     if (hover.kind === "invalid") showTip(event.clientX, event.clientY, h("b", {}, "Invalid"), ` · ${plural(hover.node.count, "call")} Laya rejected`, h("div", { class: "sub" }, "Click to see them"));
     else if (hover.kind === "jev") showTip(event.clientX, event.clientY, h("b", {}, "Laya"), h("div", { class: "sub" }, `${plural(data.records.filter(visible).length, "call")} so far`));
-    else { const o = hover.node, called = nameOf(o.kind.run, o.kind.name, o.name); showTip(event.clientX, event.clientY, h("b", {}, called), ` · chosen ${plural(o.count, "time")}`, h("div", { class: "sub" }, `${called === human(o.name) ? "" : `Its key is ${o.name}. `}${typeof o.latest === "number" ? `Laya's latest probability ${pct(o.latest)}. ` : ""}${o.count ? "Click for the calls behind it" : ""}`)); }
+    else {
+      const o = hover.node, called = nameOf(o.kind.run, o.kind.name, o.name), ids = [...new Set([...o.ids, ...o.observedIds, ...o.derivedIds])];
+      const status = o.count ? `chosen ${plural(o.count, "time")}` : o.observedIds.length ? `supplied alternative in ${plural(o.observedIds.length, "call")}` : `viewer-derived alternative in ${plural(o.derivedIds.length, "call")}`;
+      const probability = typeof o.latest === "number" ? `${o.latestOrigin === "observed" ? "Laya's" : "Viewer-derived"} latest probability ${pct(o.latest)}. ` : "";
+      showTip(event.clientX, event.clientY, h("b", {}, called), ` · ${status}`, h("div", { class: "sub" }, `${called === human(o.name) ? "" : `Its key is ${o.name}. `}${probability}${ids.length ? "Click for the source calls" : ""}`));
+    }
   });
   canvas.addEventListener("pointerleave", () => { hover = null; hideTip(); });
   canvas.addEventListener("click", (event) => {
@@ -826,7 +841,11 @@
     const hit = nodeAt(...toWorld(event.clientX, event.clientY));
     if (!hit) { if (drawer.classList.contains("open")) closeDrawer(); else focus(null); return; }
     if (hit.kind === "invalid") openList("Invalid calls", "Calls Laya rejected, newest first", [...hit.node.ids].reverse());
-    else if (hit.kind === "answer") openList(nameOf(hit.node.kind.run, hit.node.kind.name, hit.node.name), `${plural(hit.node.count, "time")} the answer to: ${hit.node.kind.asks || human(hit.node.kind.name)}`, [...hit.node.ids].reverse());
+    else if (hit.kind === "answer") {
+      const ids = [...new Set([...hit.node.ids, ...hit.node.observedIds, ...hit.node.derivedIds])].reverse();
+      const relation = hit.node.count ? `${plural(hit.node.count, "time")} chosen` : hit.node.observedIds.length ? `${plural(hit.node.observedIds.length, "call")} included this alternative` : `${plural(hit.node.derivedIds.length, "call")} included this derived alternative`;
+      openList(nameOf(hit.node.kind.run, hit.node.kind.name, hit.node.name), `${relation} · ${hit.node.kind.asks || human(hit.node.kind.name)}`, ids);
+    }
     else if (hit.kind === "question") { if (hit.node.pin) release(hit.node); else focus(hit.node.key); } // moved by hand: a click puts it back
     else { data.tab = "recent"; data.focus = null; renderCorner(true); }
   });
@@ -1011,14 +1030,17 @@
       const called = (key) => labelIn(question.criteria?.[key], field) ?? human(key);
       // an option that is a whole object is described by its description, if it has one, not by its JSON
       const described = (value) => (value && typeof value === "object" && typeof value.description === "string" ? value.description : value);
-      parts.push(h("p", { class: "a" }, answer.choice === "none" ? "None of the options" : called(answer.choice)), meter(answer.confidence, `Laya's confidence ${pct(answer.confidence)}`),
+      parts.push(h("p", { class: "a" }, answer.choice === "none" ? "None of the options" : called(answer.choice)),
+        typeof answer.confidence === "number" ? meter(answer.confidence, `Laya's reported confidence ${pct(answer.confidence)}`) : null,
         options(Object.entries(question.criteria || {}).map(([name, description]) => ({ name: called(name), description: described(description), p: answer.probabilities?.[name], chosen: name === answer.choice }))));
     } else if (type === "noul") {
       parts.push(h("p", { class: "a" }, `${pct(answer.noul)} yes`), meter(answer.noul, "Laya's probability that the answer is yes"),
         question.criteria ? options([{ name: "Yes", description: question.criteria.true, p: answer.noul, chosen: answer.noul >= 0.5 }, { name: "No", description: question.criteria.false, p: 1 - answer.noul, chosen: answer.noul < 0.5 }]) : null);
     } else if (type === "score") {
       const levels = question.criteria || [], near = Math.round(answer.score);
-      parts.push(h("p", { class: "a" }, text(levels[near] ?? `Level ${near}`)), meter(levels.length > 1 ? answer.score / (levels.length - 1) : 0, `Score ${Number(answer.score).toFixed(2)} of ${Math.max(0, levels.length - 1)} · Laya's confidence ${pct(answer.confidence)}`),
+      parts.push(h("p", { class: "a" }, text(levels[near] ?? `Level ${near}`), h("small", { class: "derived-note" }, " nearest level, viewer-derived")),
+        meter(levels.length > 1 ? answer.score / (levels.length - 1) : 0, `Laya's score ${Number(answer.score).toFixed(2)} of ${Math.max(0, levels.length - 1)}`),
+        typeof answer.confidence === "number" ? meter(answer.confidence, `Laya's reported confidence ${pct(answer.confidence)}`) : null,
         options(levels.map((description, i) => ({ name: `Level ${i}`, level: true, description, p: answer.probabilities?.[String(i)], chosen: i === near }))));
     } else parts.push(h("pre", { class: "raw" }, JSON.stringify(answer, null, 2)));
     return block(parts);
@@ -1069,7 +1091,10 @@
     };
     const copy = (value, labelText) => h("button", { class: "ghost small", onclick: (event) => navigator.clipboard.writeText(value).then(() => { event.target.textContent = "Copied"; setTimeout(() => (event.target.textContent = labelText), 1200); }) }, labelText);
     const errorText = failed(record) ? (full.response?.detail?.message ?? full.response?.error ?? record.error ?? `Status ${record.status}`) : null;
-    const entries = Object.entries(questions), alone = entries.length === 1;
+    const entries = Object.entries(questions), alone = entries.length === 1, source = record.source ?? { kind: "legacy" };
+    const runtimeWarnings = Array.isArray(full.response?.runtime?.warnings) ? full.response.runtime.warnings.filter((value) => typeof value === "string") : [];
+    const sourceBlock = source.kind === "live" ? null : h("div", { class: "provenance" }, h("p", { class: "eyebrow" }, "Source provenance"), doc(source));
+    const uncertaintyBlock = runtimeWarnings.length ? h("div", { class: "uncertainty" }, h("p", { class: "eyebrow" }, "Runtime uncertainty"), runtimeWarnings.map((warning) => h("p", {}, warning))) : null;
     // the state sent with the call, opened under the title
     const state = h("div", { class: "state" }), viewState = h("button", { class: "ghost small", "aria-pressed": "false", onclick: () => {
       const open = state.hidden;
@@ -1081,6 +1106,9 @@
       h("p", { class: "d-meta" }, [clock(record.at), `answered in ${seconds(record.elapsedMs)}`].join(" · ")),
       h("div", { class: "d-head" }, h("h2", { class: "d-title" }, alone && record.questions[0] ? questionOf(record.questions[0]) : entries.length ? `${entries.length} questions in one call` : headline(record)), viewState),
       state,
+      h("p", { class: "truth-boundary" }, "Model-observed fields are shown as returned. Event ids, selected-probability labels, nearest score levels, and graph styling are LayaView-derived."),
+      sourceBlock,
+      uncertaintyBlock,
       errorText ? h("div", { class: "notice" }, `Laya did not answer: ${text(errorText)}`) : null,
       entries.map(([qid, question], i) => answerBlock(question, answers[qid], alone, i + 1, fieldFor(record, qid) ?? fields.get(scopeOf(record.label, kindOf(qid))))),
       chainLinks(record),
@@ -1088,6 +1116,8 @@
         toggle("Details", () => h("dl", { class: "facts" },
           h("dt", {}, "Call"), h("dd", {}, String(id)),
           h("dt", {}, "Run label"), h("dd", {}, record.label || "none"),
+          h("dt", {}, "Source"), h("dd", {}, source.kind),
+          h("dt", {}, "Schema"), h("dd", { class: "mono" }, record.events?.[0]?.schema ?? "legacy"),
           h("dt", {}, "Model"), h("dd", {}, record.answeredBy && record.answeredBy !== record.model ? `${record.model} → ${record.answeredBy}` : record.model ?? "–"),
           h("dt", {}, "Input"), h("dd", {}, record.inputTokens === null ? "–" : `${record.inputTokens.toLocaleString()} tokens`),
           h("dt", {}, "Time"), h("dd", {}, `${new Date(record.at).toLocaleString()} · ${(record.elapsedMs / 1000).toFixed(2)} s`),

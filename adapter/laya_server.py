@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import re
+import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from numbers import Number
 from typing import Any
@@ -23,7 +24,12 @@ PREDICT_LOCK = threading.Lock()
 LOOPBACK_HOST = re.compile(r"^(127\.0\.0\.1|\[::1\]|([a-z0-9-]+\.)*localhost)(:\d+)?$", re.IGNORECASE)
 
 print(json.dumps({"event": "loading", "model": MODEL_NAME, "device": DEVICE}), flush=True)
-AGENT = laya.load(MODEL_NAME, device=DEVICE)
+with warnings.catch_warnings(record=True) as captured_load_warnings:
+    warnings.simplefilter("always")
+    AGENT = laya.load(MODEL_NAME, device=DEVICE)
+LOAD_WARNINGS = [str(item.message) for item in captured_load_warnings]
+for message in LOAD_WARNINGS:
+    print(json.dumps({"event": "runtime_warning", "phase": "load", "message": message}), file=sys.stderr, flush=True)
 print(json.dumps({"event": "loaded", "model": MODEL_NAME, "device": DEVICE}), flush=True)
 
 
@@ -48,21 +54,27 @@ def jsonable(value: Any) -> Any:
 
 
 def normalize_answer(answer: Any) -> Any:
-    value = jsonable(answer)
-    if not isinstance(value, dict):
-        return value
-    probabilities = value.get("probabilities")
-    if "confidence" not in value and isinstance(probabilities, dict):
-        confidence = None
-        choice = value.get("choice")
-        score = value.get("score")
-        if isinstance(choice, str) and isinstance(probabilities.get(choice), Number):
-            confidence = probabilities[choice]
-        elif isinstance(score, Number):
-            confidence = probabilities.get(str(round(float(score))))
-        if isinstance(confidence, Number):
-            value["confidence"] = float(confidence)
-    return value
+    """Make Laya output JSON-safe without inventing model fields."""
+    return jsonable(answer)
+
+
+def is_calibration_warning(message: str) -> bool:
+    """A captured warning is a calibration warning when it says model confidences cannot be trusted:
+    either it calls them uncalibrated outright, or it reports temperature entries being adjusted
+    (clamped, out of range, outside their bounds, invalid). Matches the real Laya 0.3.14 wording:
+    "invalid temperatures or values outside [0.5, 5] ... Treat confidence ... as uncalibrated." """
+    text = message.lower()
+    if "uncalibrated" in text:
+        return True
+    return "temperature" in text and any(word in text for word in ("clamp", "range", "outside", "invalid"))
+
+
+def runtime_metadata(messages: list[str]) -> dict[str, Any]:
+    calibration_warning = any(is_calibration_warning(message) for message in messages)
+    return {
+        "calibration": "warning" if calibration_warning else "unspecified",
+        "warnings": messages,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -97,7 +109,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_request():
             return
         if self.path == "/healthz":
-            self.send_json(200, {"ok": True, "backend": "laya", "model": MODEL_NAME, "device": DEVICE, "instance": INSTANCE_TOKEN})
+            self.send_json(200, {"ok": True, "backend": "laya", "model": MODEL_NAME, "device": DEVICE, "instance": INSTANCE_TOKEN, "runtime": runtime_metadata(LOAD_WARNINGS)})
             return
         self.send_json(404, {"error": "not found"})
 
@@ -129,8 +141,12 @@ class Handler(BaseHTTPRequestHandler):
 
         questions = request["questions"]
         try:
-            with PREDICT_LOCK:
+            with PREDICT_LOCK, warnings.catch_warnings(record=True) as captured_predict_warnings:
+                warnings.simplefilter("always")
                 raw = AGENT.predict(request["state"], questions)
+            predict_warnings = [str(item.message) for item in captured_predict_warnings]
+            for message in predict_warnings:
+                print(json.dumps({"event": "runtime_warning", "phase": "predict", "message": message}), file=sys.stderr, flush=True)
             normalized = jsonable(raw)
             answers = normalized.get("answers") if isinstance(normalized, dict) and isinstance(normalized.get("answers"), dict) else normalized
             if isinstance(answers, dict):
@@ -140,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
             missing = [qid for qid in questions if qid not in answers]
             if missing:
                 raise ValueError("Laya omitted answer(s): " + ", ".join(missing))
-            self.send_json(200, {"model": MODEL_NAME, "answers": answers})
+            self.send_json(200, {"model": MODEL_NAME, "answers": answers, "runtime": runtime_metadata(LOAD_WARNINGS + predict_warnings)})
         except Exception as exc:
             self.send_json(500, {"error": f"Laya inference failed: {type(exc).__name__}: {exc}"})
 

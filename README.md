@@ -53,6 +53,25 @@ Every answer comes back with an event id in `events`. When a later call follows 
 
 Agents and scripts can read `http://127.0.0.1:4777/llms.txt` for the live contract.
 
+## Import transcript or history
+
+Besides live traffic, Layaview imports one structured history item at a time:
+
+```sh
+curl -X POST http://127.0.0.1:4777/_/api/ingest -H "content-type: application/json" -d '{
+  "source": { "kind": "transcript", "id": "turn-17", "text": "agent said deployment succeeded" },
+  "label": "optional-run-label",
+  "trigger": "optional-prior-event-id",
+  "request": { "model": "laya-typed-decisions", "state": {}, "questions": { "...": "typed questions" } }
+}'
+```
+
+`source.kind` is `transcript` or `history`. The `request` runs through the same local Laya adapter and persistence path as a live call, and the source provenance is stored beside the record and searchable.
+
+The endpoint imports structured items only. It does **not** automatically turn arbitrary transcripts into questions: the caller supplies the typed questions explicitly in `request.questions`, and Layaview never derives questions, answers, or confidence from raw transcript text.
+
+A prepared three-item history lives in `demo/history-fixture.json` (a transcript assessment, a follow-up linked to its answer, and a history import). With the stack running via `scripts/run-layaview.sh`, import it in order with one command: `scripts/demo-history.sh`.
+
 ## Local-only security model
 
 Layaview and the included adapter bind to `127.0.0.1` only by default. Layaview keeps Jeview's Host and Origin protections and strips caller authorization, cookies, origins, and its own control headers before forwarding a request.

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { createJeview, DATABASE, llmsText, requestDisplay, summarize, type JeviewSummary } from "../src/jeview.ts";
+import { createJeview, DATABASE, DECISION_EVENT_SCHEMA, llmsText, requestDisplay, summarize, type JeviewSummary } from "../src/jeview.ts";
 
 type Seen = { method: string; url: string; headers: IncomingMessage["headers"]; body: string };
 type Hooks = { after(fn: () => unknown): void };
@@ -61,6 +61,97 @@ const layaAnswer = JSON.stringify({
 const records = async (base: string) => (await (await fetch(`${base}/_/api/records`)).json()) as {
   cursor: number; records: JeviewSummary[]; database: string; laya: string;
 };
+
+test("the stable decision-event schema separates observed model output from viewer-derived metadata", () => {
+  const request = { model: "laya-typed-decisions", state: { text: "source" }, questions: { assessment: { type: "choice", instructions: "Classify it", criteria: { a: "A", b: "B" } } } };
+  const response = { model: "convaiinnovations/laya-typed-decisions", answers: { assessment: { choice: "a", probabilities: { a: 0.51234567, b: 0.48765433 } } }, runtime: { calibration: "warning", warnings: ["temperature entry is outside range and will be clamped"] } };
+  const body = Buffer.from(JSON.stringify(request));
+  const summary = summarize({ id: 7, at: "2026-10-03T00:00:00.000Z", label: "schema", trigger: null, status: 200, elapsedMs: 9 }, body, request, response);
+  assert.equal(summary.events[0]!.schema, DECISION_EVENT_SCHEMA);
+  assert.deepEqual(summary.events[0]!.model.observed, { choice: "a", probabilities: { a: 0.51234567, b: 0.48765433 } });
+  assert.equal("confidence" in summary.events[0]!.model.observed, false);
+  assert.deepEqual(summary.events[0]!.derived, { landing: "a", selectedProbability: 0.51234567, uncertainty: { confidence: "missing", calibration: "warning", warnings: ["temperature entry is outside range and will be clamped"] } });
+  assert.equal(summary.questions[0]!.probabilities!.a, 0.51234567);
+  assert.equal(summary.questions[0]!.p, 0.51234567);
+  assert.deepEqual(summary.source, { kind: "live" });
+});
+
+test("transcript/history ingestion uses the same Laya path and preserves source provenance", async (t) => {
+  const answer = JSON.stringify({ model: "convaiinnovations/laya-typed-decisions", answers: { kind: { choice: "bug_report", probabilities: { bug_report: 0.61234567, none: 0.38765433 } } } });
+  const upstream = await laya(t, () => ({ body: answer }));
+  const { base } = await proxy(t, upstream.url);
+  const importedRequest = { model: "laya-typed-decisions", state: { excerpt: "original transcript line" }, questions: { kind: question } };
+  const source = { kind: "transcript", id: "turn-17", at: "2026-10-02T23:15:00Z", text: "agent said deployment succeeded", uri: "local://run/17" };
+  const imported = await fetch(`${base}/_/api/ingest`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: "imported-run", source, request: importedRequest }) });
+  assert.equal(imported.status, 200);
+  assert.deepEqual((await imported.json() as { events: Record<string, string> }).events, { kind: "1:kind" });
+  assert.equal(upstream.seen[0]!.body, JSON.stringify(importedRequest));
+  const [summary] = (await records(base)).records;
+  assert.deepEqual(summary!.source, source);
+  assert.equal(summary!.events[0]!.provenance.source.text, source.text);
+  assert.equal(summary!.events[0]!.model.observed.probabilities!.bug_report, 0.61234567);
+  assert.equal(summary!.events[0]!.derived.selectedProbability, 0.61234567);
+  assert.equal(summary!.events[0]!.derived.uncertainty.confidence, "missing");
+  const full = await (await fetch(`${base}/_/api/records/1`)).json() as { request: unknown; response: unknown };
+  assert.deepEqual(full.request, importedRequest);
+  assert.deepEqual(full.response, JSON.parse(answer));
+  assert.deepEqual(((await (await fetch(`${base}/_/api/search?q=deployment+succeeded`)).json()) as { ids: number[] }).ids, [1]);
+  const before = upstream.seen.length;
+  const refused = await fetch(`${base}/_/api/ingest`, { method: "POST", headers: { origin: "https://attacker.example", "content-type": "application/json" }, body: JSON.stringify({ source, request: importedRequest }) });
+  assert.equal(refused.status, 403);
+  assert.equal(upstream.seen.length, before);
+});
+test("a distribution wider than the display cap survives whole in the canonical event", () => {
+  const criteria: Record<string, string> = {}, spread: Record<string, number> = {};
+  for (let i = 0; i < 75; i++) { criteria[`opt_${i}`] = `option ${i}`; spread[`opt_${i}`] = i === 74 ? 0.5 : 0.5 / 74; }
+  const request = { model: "laya-typed-decisions", state: {}, questions: { wide: { type: "choice", instructions: "Pick one of many", criteria } } };
+  const response = { model: "convaiinnovations/laya-typed-decisions", answers: { wide: { choice: "opt_74", probabilities: spread } } };
+  const summary = summarize({ id: 9, at: "2026-10-03T00:00:00.000Z", label: "wide", trigger: null, status: 200, elapsedMs: 3 }, Buffer.from(JSON.stringify(request)), request, response);
+  const observed = summary.events[0]!.model.observed;
+  assert.equal(Object.keys(observed.probabilities!).length, 75);
+  assert.equal(observed.probabilities!.opt_74, 0.5);
+  assert.equal(observed.probabilities!.opt_73, 0.5 / 74);
+  assert.equal(summary.events[0]!.derived.selectedProbability, 0.5);
+  assert.equal(summary.events[0]!.request.options!.length, 75);
+  assert.equal(Object.keys(summary.questions[0]!.probabilities!).length, 60);
+  assert.equal(summary.questions[0]!.options!.length, 60);
+  assert.equal(summary.questions[0]!.p, 0.5);
+});
+
+test("ingest refuses malformed envelopes unrecorded, records adapter failure with provenance, and links imports in order across a restart", async (t) => {
+  const answer = JSON.stringify({ model: "convaiinnovations/laya-typed-decisions", answers: { kind: { choice: "bug_report", probabilities: { bug_report: 0.8, none: 0.2 } } } });
+  const upstream = await laya(t, () => ({ body: answer }));
+  const dir = mkdtempSync(join(tmpdir(), "layaview-"));
+  const first = createJeview({ dir, layaEndpoint: upstream.url });
+  t.after(() => { first.server.close(); rmSync(dir, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${await listen(first.server)}`;
+  const post = (baseUrl: string, body: unknown) => fetch(`${baseUrl}/_/api/ingest`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const source = { kind: "history", id: "run-9", text: "imported history marker quixotic" };
+  const req = { model: "laya-typed-decisions", state: {}, questions: { kind: question } };
+  for (const bad of [{}, { source }, { request: req }, { source: { kind: "chat" }, request: req }, { source, request: req, trigger: "x".repeat(201) }, "not an object"]) {
+    assert.equal((await post(base, bad)).status, 400);
+  }
+  assert.equal(upstream.seen.length, 0);
+  assert.deepEqual((await records(base)).records, []);
+  const one = await (await post(base, { label: "chain", source, request: req })).json() as { events: Record<string, string> };
+  assert.equal(one.events.kind, "1:kind");
+  const two = await post(base, { label: "chain", source, request: req, trigger: one.events.kind });
+  assert.equal(two.status, 200);
+  await new Promise((accept) => first.server.close(accept));
+  const reopened = await proxy(t, upstream.url, { dir });
+  const listed = (await records(reopened.base)).records;
+  assert.deepEqual(listed.map((r) => [r.id, r.trigger]), [[1, null], [2, "1:kind"]]);
+  assert.equal(listed[1]!.events[0]!.parentEventId, "1:kind");
+  assert.deepEqual(((await (await fetch(`${reopened.base}/_/api/search?q=quixotic`)).json()) as { ids: number[] }).ids, [2, 1]);
+  const dead = await proxy(t, "http://127.0.0.1:9/v1/systemone", { dir });
+  const failedImport = await post(dead.base, { label: "chain", source, request: req });
+  assert.equal(failedImport.status, 502);
+  const after = (await records(dead.base)).records;
+  assert.equal(after.length, 3);
+  assert.deepEqual([after[2]!.status, after[2]!.source], [502, source]);
+  assert.match(after[2]!.error ?? "", /Laya unreachable/);
+});
+
 
 test("a Laya request needs no key, keeps the body whole, strips caller auth, adds events, and records local metadata", async (t) => {
   const upstream = await laya(t, () => ({ body: layaAnswer, headers: { "content-type": "application/json", "x-request-id": "r-1" } }));

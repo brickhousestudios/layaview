@@ -37,16 +37,26 @@ const UI_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
 
 /** One question as listed: its id, what it asks in its own words, what it offered (a choice's options, a score's
- * number of levels) and the answer's headline. `p` is the probability Laya gave the answer it landed on: the chosen
- * option, the nearest level, or the more likely side of a yes/no; `probabilities` is the whole spread. */
+ * number of levels) and the answer's headline. `p` is viewer-derived from an observed probability or yes/no value;
+ * `confidence` exists only when the model actually supplied it. */
 export type AnswerSummary = { id: string; type: string; asks: string; options?: string[]; levels?: number; choice?: string; score?: number; noul?: number; confidence?: number; p?: number; probabilities?: Record<string, number> };
+export const DECISION_EVENT_SCHEMA = "layaview.decision-event.v1" as const;
+export type SourceProvenance = { kind: string; id?: string; at?: string; text?: string; uri?: string };
+export type DecisionEventV1 = {
+  schema: typeof DECISION_EVENT_SCHEMA; eventId: string; parentEventId: string | null; callId: number;
+  provenance: { source: SourceProvenance; label: string; at: string; requestKey: string; stateKey: string | null };
+  request: { questionId: string; type: string; asks: string; requestedModel: string | null; options?: string[]; levels?: number };
+  model: { answeredBy: string | null; observed: { choice?: string; score?: number; noul?: number; confidence?: number; probabilities?: Record<string, number> } };
+  derived: { landing: string | null; selectedProbability?: number; uncertainty: { confidence: "reported" | "missing"; calibration: "warning" | "unspecified"; warnings?: string[] } };
+};
+/** Display cap for the compact summary's option/probability lists only. Canonical decision events are never capped. */
 const OPTIONS_LISTED = 60;
 /** One recorded Laya call, as listed. `key` is the sha256 of the exact body sent to Laya: the same request always has
  * the same key, so a client that caches Laya answers by that hash can find the call here. */
 export type JeviewSummary = {
-  id: number; at: string; label: string; trigger: string | null; display?: Record<string, string>;
+  id: number; at: string; label: string; trigger: string | null; display?: Record<string, string>; source: SourceProvenance;
   key: string; stateKey: string | null; status: number; elapsedMs: number; bytes: number;
-  model: string | null; answeredBy: string | null; inputTokens: number | null; cost: number | null; questions: AnswerSummary[]; error?: string;
+  model: string | null; answeredBy: string | null; inputTokens: number | null; cost: number | null; questions: AnswerSummary[]; events: DecisionEventV1[]; error?: string;
 };
 /** The whole call: the request as sent to Laya (parsed, or its text when it was not JSON) and the response as Laya returned it. */
 export type JeviewRecord = { summary: JeviewSummary; request: unknown; response: unknown };
@@ -89,31 +99,45 @@ export function asks(instructions: unknown): string {
   return text.length > 300 ? text.slice(0, 297) + "..." : text;
 }
 
-export function summarize(call: { id: number; at: string; label: string; trigger: string | null; display?: Record<string, string>; status: number; elapsedMs: number; error?: string }, body: Buffer, request: unknown, response: unknown): JeviewSummary {
+export function summarize(call: { id: number; at: string; label: string; trigger: string | null; display?: Record<string, string>; source?: SourceProvenance; status: number; elapsedMs: number; error?: string }, body: Buffer, request: unknown, response: unknown): JeviewSummary {
   const questions = object(request) && object(request.questions) ? request.questions : {};
   const answers = object(response) && object(response.answers) ? response.answers : {};
   const usage = object(response) && object(response.usage) ? response.usage : {};
+  const runtime = object(response) && object(response.runtime) ? response.runtime : {};
+  const warnings = Array.isArray(runtime.warnings) ? runtime.warnings.filter((value): value is string => typeof value === "string") : [];
+  const calibration = runtime.calibration === "warning" ? "warning" as const : "unspecified" as const;
   const inputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : null;
-  return {
-    ...call, key: sha256(body), stateKey: object(request) && "state" in request ? sha256(JSON.stringify(request.state) ?? "null") : null, bytes: body.length,
-    model: object(request) && typeof request.model === "string" ? request.model : null,
-    answeredBy: object(response) && typeof response.model === "string" ? response.model : null,
-    inputTokens, cost: null,
-    questions: Object.entries(questions).map(([id, question]) => {
-      const answer = answers[id], summary: AnswerSummary = { id, type: object(question) && typeof question.type === "string" ? question.type : "unknown", asks: asks(object(question) ? question.instructions : undefined) };
-      if (object(question) && question.type === "choice" && object(question.criteria)) summary.options = Object.keys(question.criteria).slice(0, OPTIONS_LISTED);
-      if (object(question) && question.type === "score" && Array.isArray(question.criteria)) summary.levels = question.criteria.length;
-      if (object(answer)) for (const field of ["choice", "score", "noul", "confidence"] as const) if (typeof answer[field] === (field === "choice" ? "string" : "number")) (summary as Record<string, unknown>)[field] = answer[field];
-      const probabilities = object(answer) && object(answer.probabilities) ? answer.probabilities : {};
-      const landed = summary.choice ?? (summary.score === undefined ? undefined : String(Math.round(summary.score)));
-      if (landed !== undefined && typeof probabilities[landed] === "number") summary.p = probabilities[landed];
-      else if (summary.noul !== undefined) summary.p = Math.max(summary.noul, 1 - summary.noul);
-      // every option's probability, so the viewer can show the whole spread a choice or a ranking came back with
-      const spread = Object.entries(probabilities).filter(([, v]) => typeof v === "number").slice(0, OPTIONS_LISTED);
-      if (spread.length) summary.probabilities = Object.fromEntries(spread.map(([k, v]) => [k, Math.round((v as number) * 1000) / 1000]));
-      return summary;
-    }),
-  };
+  const key = sha256(body), stateKey = object(request) && "state" in request ? sha256(JSON.stringify(request.state) ?? "null") : null;
+  const model = object(request) && typeof request.model === "string" ? request.model : null;
+  const answeredBy = object(response) && typeof response.model === "string" ? response.model : null;
+  const source = call.source ?? { kind: "live" };
+  const summaries: AnswerSummary[] = [], events: DecisionEventV1[] = [];
+  for (const [id, question] of Object.entries(questions)) {
+    const answer = answers[id], summary: AnswerSummary = { id, type: object(question) && typeof question.type === "string" ? question.type : "unknown", asks: asks(object(question) ? question.instructions : undefined) };
+    // The compact summary lists at most OPTIONS_LISTED options for display; the canonical event keeps them all.
+    const allOptions = object(question) && question.type === "choice" && object(question.criteria) ? Object.keys(question.criteria) : undefined;
+    if (allOptions) summary.options = allOptions.slice(0, OPTIONS_LISTED);
+    if (object(question) && question.type === "score" && Array.isArray(question.criteria)) summary.levels = question.criteria.length;
+    if (object(answer)) for (const field of ["choice", "score", "noul", "confidence"] as const) if (typeof answer[field] === (field === "choice" ? "string" : "number")) (summary as Record<string, unknown>)[field] = answer[field];
+    const probabilities = object(answer) && object(answer.probabilities) ? Object.fromEntries(Object.entries(answer.probabilities).filter(([, value]) => typeof value === "number")) as Record<string, number> : undefined;
+    if (probabilities && Object.keys(probabilities).length) summary.probabilities = Object.fromEntries(Object.entries(probabilities).slice(0, OPTIONS_LISTED));
+    const landing = summary.choice ?? (summary.noul === undefined ? (summary.score === undefined ? null : `level ${Math.round(summary.score)}`) : summary.noul >= 0.5 ? "yes" : "no");
+    const probabilityKey = summary.choice ?? (summary.score === undefined ? undefined : String(Math.round(summary.score)));
+    const selectedProbability = probabilityKey !== undefined && probabilities && typeof probabilities[probabilityKey] === "number" ? probabilities[probabilityKey] : summary.noul === undefined ? undefined : Math.max(summary.noul, 1 - summary.noul);
+    if (selectedProbability !== undefined) summary.p = selectedProbability;
+    const observed: DecisionEventV1["model"]["observed"] = {};
+    for (const field of ["choice", "score", "noul", "confidence"] as const) if (summary[field] !== undefined) (observed as Record<string, unknown>)[field] = summary[field];
+    if (probabilities && Object.keys(probabilities).length) observed.probabilities = probabilities;
+    events.push({
+      schema: DECISION_EVENT_SCHEMA, eventId: eventId(call.id, id), parentEventId: call.trigger, callId: call.id,
+      provenance: { source, label: call.label, at: call.at, requestKey: key, stateKey },
+      request: { questionId: id, type: summary.type, asks: summary.asks, requestedModel: model, ...(allOptions ? { options: allOptions } : {}), ...(summary.levels !== undefined ? { levels: summary.levels } : {}) },
+      model: { answeredBy, observed },
+      derived: { landing, ...(selectedProbability !== undefined ? { selectedProbability } : {}), uncertainty: { confidence: summary.confidence === undefined ? "missing" : "reported", calibration, ...(warnings.length ? { warnings } : {}) } },
+    });
+    summaries.push(summary);
+  }
+  return { ...call, source, key, stateKey, bytes: body.length, model, answeredBy, inputTokens, cost: null, questions: summaries, events };
 }
 
 /** Everything the proxy keeps, in one SQLite database in a folder private to the user: each call whole, in the order
@@ -171,11 +195,11 @@ export class JeviewStore {
     const row = this.db.prepare("SELECT summary, request, response FROM calls WHERE id = ?").get(id);
     return row ? { summary: JSON.parse(String(row.summary)), request: JSON.parse(String(row.request)), response: JSON.parse(String(row.response)) } : null;
   }
-  /** Ids of the calls whose label, trigger, request or response contains every word, case-insensitively, newest first. */
+  /** Ids of calls whose provenance, label, trigger, request or response contains every word, case-insensitively. */
   search(query: string, limit = 1000): number[] {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return [];
-    const like = words.map(() => "lower(label || ' ' || COALESCE(trigger, '') || ' ' || request || ' ' || response) LIKE ? ESCAPE '\\'").join(" AND ");
+    const like = words.map(() => "lower(summary || ' ' || label || ' ' || COALESCE(trigger, '') || ' ' || request || ' ' || response) LIKE ? ESCAPE '\\'").join(" AND ");
     return this.db.prepare(`SELECT id FROM calls WHERE ${like} ORDER BY id DESC LIMIT ?`).all(...words.map((word) => `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`), limit).map((row) => Number(row.id));
   }
   setting(name: string): string | undefined {
@@ -218,6 +242,16 @@ answered) in a SQLite database on this machine. By default both Layaview and the
 Send ${origin}/v1/systemone a JSON body { model, state, questions }. To group requests under a project or label, add it
 to the path: ${origin}/<label>/v1/systemone.
 
+## Import transcript or history
+
+POST ${origin}/_/api/ingest with { source, request, label?, trigger? }. source.kind must be "transcript" or "history" and
+may carry id, at, text and uri. request is the ordinary { model, state, questions } object. Layaview runs it through the
+same Laya adapter and persistence path as live traffic; it does not invent questions or answers from raw text.
+It imports structured items only: it does not automatically turn arbitrary transcripts into questions.
+
+Recorded summaries include layaview.decision-event.v1 events. model.observed contains only fields returned by Laya;
+derived contains viewer-computed landing, selected probability and uncertainty labels. Missing confidence stays missing.
+
 ## Link a question to the answer that led to it
 
 Every answer comes back with an event id in "events": { "<question id>": "<call>:<question id>" }.
@@ -249,7 +283,7 @@ Laya's answers and refusals are recorded, and so are 502s. The 400s, 413s and 40
 - GET ${origin}/_/api/records?since=<n>: summaries in the order calls finished, at most ${PAGE.toLocaleString("en")} at a time.
 - GET ${origin}/_/api/records?ids=<id>,<id>: summaries of named calls, at most ${IDS_LISTED.toLocaleString("en")}.
 - GET ${origin}/_/api/records/<id>: one call, the request sent to Laya and the response it returned.
-- GET ${origin}/_/api/search?q=<words>: ids of calls whose label, trigger, request or response contains every word.
+- GET ${origin}/_/api/search?q=<words>: ids of calls whose provenance, label, trigger, request or response contains every word.
 
 A record's "key" is the sha256 of the exact body sent to Laya.
 `;
@@ -265,7 +299,34 @@ export function createJeview(options: JeviewOptions): Jeview {
   const layaEndpoint = endpoint.href, request = options.fetch ?? fetch, store = new JeviewStore(options.dir);
   const ui = resolve(fileURLToPath(options.ui ?? new URL("../ui/", import.meta.url)));
 
-  /** One Laya call: to the adapter, back to the caller with an event id per answer, and into the database. */
+  type RunResult = { status: number; headers: Record<string, string>; reply: Buffer };
+  type RunMeta = { label: string; trigger: string | null; display?: Record<string, string>; source: SourceProvenance };
+
+  /** One Laya call shared by live proxy traffic and imported history. Raw model output is persisted; events are viewer metadata. */
+  async function runCall(sent: Buffer, requestValue: unknown, headers: Record<string, string>, meta: RunMeta): Promise<RunResult> {
+    const id = store.allocate(), at = new Date().toISOString(), started = Date.now();
+    const keep = (status: number, text: string, error?: string) => {
+      const responseValue = text ? parse(text) : null;
+      store.save({ summary: summarize({ id, at, label: meta.label, trigger: meta.trigger, source: meta.source, ...(meta.display ? { display: meta.display } : {}), status, elapsedMs: Date.now() - started, ...(error ? { error } : {}) }, sent, requestValue, responseValue), request: requestValue, response: responseValue });
+    };
+    const fail = (status: number, message: string): RunResult => {
+      keep(status, "", message);
+      return { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }, reply: Buffer.from(JSON.stringify({ error: message })) };
+    };
+    let response: Response;
+    try { response = await request(layaEndpoint, { method: "POST", headers, body: new Uint8Array(sent), redirect: "manual" }); }
+    catch (error) { return fail(502, `Laya unreachable: ${(error as Error).message}`); }
+    let text: Buffer;
+    try { text = Buffer.from(await response.arrayBuffer()); } catch (error) { return fail(502, `Laya's answer was cut short: ${(error as Error).message}`); }
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, name) => { if (!RESPONSE_DROP.has(name) && !name.startsWith("access-control-")) responseHeaders[name] = value; });
+    const returned = parse(text.toString("utf8"));
+    const events = object(returned) && object(returned.answers) ? Object.fromEntries(Object.keys(returned.answers).map((question) => [question, eventId(id, question)])) : null;
+    const reply = events && object(returned) ? Buffer.from(JSON.stringify({ ...returned, events })) : text;
+    keep(response.status, text.toString("utf8"));
+    return { status: response.status, headers: responseHeaders, reply };
+  }
+
   async function ask(req: IncomingMessage, res: ServerResponse, label: string) {
     let body: Buffer;
     try { body = await readBody(req, BODY_LIMIT); } catch (error) { return send(res, (error as { status?: number }).status ?? 400, { error: (error as Error).message }); }
@@ -275,27 +336,29 @@ export function createJeview(options: JeviewOptions): Jeview {
     let trigger: string | null;
     try { trigger = requestTrigger(triggerHeader === undefined ? null : String(triggerHeader)); } catch (error) { return send(res, 400, { error: `layaview: ${(error as Error).message}` }); }
     const displayHeader = ownHeader(req, "display"), display = requestDisplay(displayHeader === undefined ? null : String(displayHeader));
-    const sent = body, requestValue = parse(body.toString("utf8")); // sent on as it came
-    const id = store.allocate(), at = new Date().toISOString(), started = Date.now();
-    const keep = (status: number, text: string, error?: string) => {
-      const responseValue = text ? parse(text) : null;
-      store.save({ summary: summarize({ id, at, label, trigger, ...(display ? { display } : {}), status, elapsedMs: Date.now() - started, ...(error ? { error } : {}) }, sent, requestValue, responseValue), request: requestValue, response: responseValue });
-    };
-    const fail = (status: number, message: string) => { keep(status, "", message); return send(res, status, { error: message }); };
-    let response: Response;
-    try { response = await request(layaEndpoint, { method: "POST", headers, body: new Uint8Array(sent), redirect: "manual" }); }
-    catch (error) { return fail(502, `Laya unreachable: ${(error as Error).message}`); }
-    let text: Buffer;
-    try { text = Buffer.from(await response.arrayBuffer()); } catch (error) { return fail(502, `Laya's answer was cut short: ${(error as Error).message}`); }
-    const responseHeaders: Record<string, string> = {};
-    response.headers.forEach((value, name) => { if (!RESPONSE_DROP.has(name) && !name.startsWith("access-control-")) responseHeaders[name] = value; }); // The adapter's CORS grants are for its own address, not this one
-    const returned = parse(text.toString("utf8"));
-    // each answer's event id, for a later request to name as its trigger
-    const events = object(returned) && object(returned.answers) ? Object.fromEntries(Object.keys(returned.answers).map((question) => [question, eventId(id, question)])) : null;
-    const reply = events && object(returned) ? Buffer.from(JSON.stringify({ ...returned, events })) : text;
-    res.writeHead(response.status, responseHeaders);
-    res.end(reply);
-    keep(response.status, text.toString("utf8"));
+    const result = await runCall(body, parse(body.toString("utf8")), headers, { label, trigger, source: { kind: "live" }, ...(display ? { display } : {}) });
+    res.writeHead(result.status, result.headers);
+    res.end(result.reply);
+  }
+
+  /** Replay one transcript/history item through Laya without inventing questions, branches, or model fields. */
+  async function ingest(req: IncomingMessage, res: ServerResponse) {
+    let body: Buffer;
+    try { body = await readBody(req, BODY_LIMIT); } catch (error) { return send(res, (error as { status?: number }).status ?? 400, { error: (error as Error).message }); }
+    const envelope = parse(body.toString("utf8"));
+    if (!object(envelope) || !object(envelope.request) || !object(envelope.source)) return send(res, 400, { error: "layaview: ingest requires { source, request }" });
+    const kind = typeof envelope.source.kind === "string" ? envelope.source.kind.trim() : "";
+    if (kind !== "transcript" && kind !== "history") return send(res, 400, { error: "layaview: source.kind must be transcript or history" });
+    const source: SourceProvenance = { kind };
+    for (const field of ["id", "at", "text", "uri"] as const) if (typeof envelope.source[field] === "string") source[field] = envelope.source[field];
+    const label = typeof envelope.label === "string" ? envelope.label : "";
+    const triggerValue = envelope.trigger === undefined || envelope.trigger === null ? null : String(envelope.trigger);
+    let trigger: string | null;
+    try { trigger = requestTrigger(triggerValue); } catch (error) { return send(res, 400, { error: `layaview: ${(error as Error).message}` }); }
+    const sent = Buffer.from(JSON.stringify(envelope.request));
+    const result = await runCall(sent, envelope.request, { "content-type": "application/json" }, { label, trigger, source });
+    res.writeHead(result.status, result.headers);
+    res.end(result.reply);
   }
 
   const server = createServer((req, res) => {
@@ -311,7 +374,12 @@ export function createJeview(options: JeviewOptions): Jeview {
         if (segments.at(-1) === "typesafe" || segments.at(-1) === "laya") segments.pop(); // compatibility/vendor path segment
         return ask(req, res, segments.join("/"));
       }
-      if (req.method !== "GET") return send(res, 405, { error: "Send Laya requests to /v1/systemone; the viewer is otherwise read-only" });
+      if (url.pathname === "/_/api/ingest") {
+        if (req.method !== "POST") return send(res, 405, { error: "Imported history is POSTed to /_/api/ingest" });
+        if (foreign(req.headers.origin) || req.headers["sec-fetch-site"] === "cross-site") return send(res, 403, { error: "The ingest API is not for pages on other sites" });
+        return ingest(req, res);
+      }
+      if (req.method !== "GET") return send(res, 405, { error: "Send live Laya requests to /v1/systemone or imported history to /_/api/ingest" });
       // a page on another site cannot read what the API answers, and should not get to make it search either; the viewer
       // itself stays reachable, since a link to it from another site is that kind of request too
       if (req.headers["sec-fetch-site"] === "cross-site" && url.pathname.startsWith("/_/api/")) return send(res, 403, { error: "The API is not for pages on other sites" });

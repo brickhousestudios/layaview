@@ -92,6 +92,37 @@ The `feature/laya-native` branch already contains:
 
 This document is the durable continuation point if chat context is lost.
 
+## Frozen decision/event schema — 2026-10-03
+
+New records expose `layaview.decision-event.v1` under each summary's `events` array. The boundary is deliberate:
+
+- `model.observed` contains only fields actually returned by Laya: typed result (`choice`, `score`, or `noul`), exact `probabilities`, and `confidence` only when present.
+- `derived` contains LayaView work: landing/nearest-level selection, selected probability, event identity relationships, and uncertainty labels.
+- `provenance` identifies the source, request hash, state hash, run label, and time.
+- `derived.uncertainty.confidence` is `reported` or `missing`; missing confidence is never reconstructed from a probability.
+- `derived.uncertainty.calibration` is `warning` only when the adapter captured a concrete runtime calibration warning, otherwise `unspecified`. `unspecified` never means calibrated.
+- Probability values are kept at the precision Laya returned; the summary layer does not round them.
+
+The older compact `questions` fields remain for viewer/backward compatibility, but they follow the same truth rule: `confidence` is absent unless Laya supplied it and `p` is explicitly viewer-derived from an observed distribution or binary `noul` value.
+
+### Transcript/history ingestion
+
+`POST /_/api/ingest` accepts one structured history item:
+
+```json
+{
+  "source": { "kind": "transcript", "id": "turn-17", "at": "...", "text": "...", "uri": "..." },
+  "label": "optional-run-label",
+  "trigger": "optional-prior-event-id",
+  "request": { "model": "...", "state": {}, "questions": {} }
+}
+```
+
+`source.kind` is `transcript` or `history`. LayaView sends only `request` through the same configured Laya adapter used by live calls and persists the source provenance beside the resulting record. It does **not** invent questions from transcript text, synthesize answers, or infer missing confidence. Imported source text is searchable through the existing local search API.
+
+The endpoint imports structured items only. It does **not** automatically turn arbitrary transcripts into questions: the caller supplies each item's typed questions explicitly in `request.questions`, and LayaView never derives questions from `source.text`.
+
+In the graph, solid/filled outcomes are chosen paths. Hollow dashed outcomes appear only when a model distribution supplied an alternative; viewer-derived binary complements use a different dotted treatment. Clicking either resolves back to the recorded call and, for imports, its original source provenance.
 
 ## Real local Laya acceptance — 2026-10-02
 
@@ -133,3 +164,11 @@ npm run acceptance:laya
 ```
 
 The canary validates the local inference/persistence/readback plumbing. It does not certify Laya's semantic accuracy on the example.
+
+### Acceptance addendum — 2026-10-23 (through ingestion)
+
+The same example was re-run through `POST /_/api/ingest` (transcript source `canary-2026-10-02`) against the real local model on CPU, in an isolated data directory (dir `0700`, SQLite `0600`). Plumbing passed end to end: the persisted `layaview.decision-event.v1` events carried the model's exact observed output, the source provenance, and the runtime warning verbatim; readback matched the ingest.
+
+The model's judgment failed the same way again: it selected `verified_success` (probability `0.4362`, reported confidence `0.0208`) for the HTTP-503 observation, with severity score `1.8698`. As before, this is recorded as a model judgment failure, not corrected or rewritten.
+
+One truth-labeling fix came out of this run: the adapter's calibration classifier had been written against a paraphrase of Laya's warning ("clamp"/"range"), so the real warning text — "invalid temperatures or values outside [0.5, 5] ... Treat confidence from the affected entries as uncalibrated" — was classified `unspecified` even though the warning itself was preserved. The classifier now recognizes the warning's actual vocabulary (including an explicit `uncalibrated` statement), and the re-run records `derived.uncertainty.calibration: "warning"` for both events, with a regression test using the verbatim warning.
