@@ -1,16 +1,16 @@
-// Pixel Knight: a tiny side-scroller that Jev plays through Jeview, drawn live in the browser.
+// Pixel Knight: a tiny side-scroller that Laya plays through Layaview, drawn live in the browser.
 //
 //   node demo/pixel-knight.ts [--port 4781] [--proxy http://127.0.0.1:4777] [--label pixel-knight] [--ahead 3] [--pace 0] [--fail 0.03]
 //
-// Open http://127.0.0.1:4781/ to watch. The game runs here: each turn Jev sees the tiles ahead of the knight (and what
+// Open http://127.0.0.1:4781/ to watch. The game runs here: each turn Laya sees the tiles ahead of the knight (and what
 // each button would do) and picks a button; the game moves the knight, the slimes, bats and fireballs, and keeps score.
-// Some answers lead on to more questions, each sent with a Jeview-Trigger header naming the answer that led to it, and
-// some change the play: a jump Jev doubts is replaced by another button, and a knight on its last heart may drink its
-// potion. The page draws each turn as it comes; open Jeview beside it to watch Jev think. It plays only while a page
-// is open. Every call goes to the real Jev through Jeview (one to four a turn, about ten cents an hour).
+// Some answers lead on to more questions, each sent with a Layaview-Trigger header naming the answer that led to it, and
+// some change the play: a jump Laya doubts is replaced by another button, and a knight on its last heart may drink its
+// potion. The page draws each turn as it comes; open Layaview beside it to watch Laya think. It plays only while a page
+// is open. Every call goes to the configured local Laya adapter through Layaview.
 //
-// Jev decides the coming turns while the page is still drawing this one, up to --ahead turns ahead, so a slow answer
-// never shows. --pace adds a pause between turns in milliseconds, and --fail says how often a turn also sends a call Jev
+// Laya decides the coming turns while the page is still drawing this one, up to --ahead turns ahead, so a slow answer
+// never shows. --pace adds a pause between turns in milliseconds, and --fail says how often a turn also sends a call Laya
 // rejects.
 import { readFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
@@ -30,7 +30,7 @@ const port = Number(values.port), proxy = values.proxy.replace(/\/+$/, "");
 const url = `${proxy}${values.label ? `/${encodeURIComponent(values.label)}` : ""}/v1/systemone`;
 const pace = Number(values.pace), failRate = Number(values.fail), ahead = Math.max(1, Number(values.ahead));
 
-// ---------- the questions Jev is asked ----------
+// ---------- the questions Laya is asked ----------
 const RULES = "You play Pixel Knight, a side-scroller. Each turn the knight does one thing: step right, step left, jump (over the next tile, landing two tiles ahead), press X (swing the sword at the next tile), or wait. Reach the flag at the end of the level. Falling into a gap or stepping on spikes costs a heart, and so does touching a slime, a low bat or a fireball. Jumping onto a slime squashes it. Crates and the Slime King block the way: smash a crate with the sword, and hit the Slime King three times. Coins are worth 10 points. With no hearts left, the level starts again. Tips: pick the safe move that gets furthest right. Run when the way ahead is clear. Jump only over a gap, spikes or an enemy right in front, onto a slime to squash it, or for a coin in the air, and only with a safe landing. Swing the sword at a crate, a bat or the Slime King right next to the knight. Step back or wait only to let a fireball or a swooping bat pass.";
 const QUESTIONS = {
   danger: { type: "noul", instructions: "Is the knight in danger in `frame`?" },
@@ -81,7 +81,7 @@ const mobAt = (x: number, high?: boolean) => game.level.mobs.find((m) => m.x ===
 const blocked = (x: number) => { const m = mobAt(x, false); return !!m && (m.kind === "crate" || m.kind === "boss"); };
 const names: Record<Kind, string> = { slime: "a slime", boss: "the Slime King", crate: "a crate", bat: "a bat", fireball: "a fireball" };
 
-/** One tile in words, for Jev. */
+/** One tile in words, for Laya. */
 function describe(x: number): string {
   if (x < 0) return "the start of the level";
   if (x >= LENGTH) return "past the end of the level";
@@ -139,7 +139,7 @@ function buttonQuestion(withJump = true) {
     ? { type: "choice", instructions: "Following `rules`, which button should the knight press now? Each option says what it would do.", criteria }
     : { type: "choice", instructions: "The knight will not jump. Following `rules`, which button should it press instead? Each option says what it would do.", criteria };
 }
-/** What Jev sees this turn. */
+/** What Laya sees this turn. */
 const frame = () => ({
   level: game.level.number, turn: game.turn, hearts: `${game.hearts} of 3`, coins: game.coins, potion: game.potion ? "one" : "none",
   knight: `on tile ${game.x + 1} of ${LENGTH}, standing on ${describe(game.x)}`,
@@ -219,25 +219,25 @@ const scene = () => ({
 });
 const hud = () => ({ level: game.level.number, hearts: game.hearts, coins: game.coins, score: game.score, potion: game.potion, turn: game.turn, wins: game.wins, restarts: game.restarts });
 
-// ---------- asking Jev ----------
+// ---------- asking Laya ----------
 type Answer = { choice?: string; confidence?: number; noul?: number; score?: number };
 type Reply = { answers: Record<string, Answer>; events: Record<string, string> };
-/** One call through Jeview; `trigger` is the event id of the answer it follows from. Null when Jev did not answer. */
+/** One call through Layaview; `trigger` is the event id of the answer it follows from. Null when Laya did not answer. */
 async function ask(state: unknown, questions: Record<string, unknown>, trigger?: string): Promise<Reply | null> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(trigger ? { "jeview-trigger": trigger } : {}) },
+    headers: { "content-type": "application/json", ...(trigger ? { "layaview-trigger": trigger } : {}) },
     body: JSON.stringify({ model: "jev-latest", state, questions }),
   });
   return response.ok ? (await response.json()) as Reply : null;
 }
 
-/** One turn: Jev decides and the game moves on. Only the questions that change the move hold it up (a jump Jev doubts,
+/** One turn: Laya decides and the game moves on. Only the questions that change the move hold it up (a jump Laya doubts,
  * the potion); the rest are asked alongside and their answers sent to the page when they come. What the page needs. */
 async function turn() {
   game.turn++;
   const state = { rules: RULES, frame: frame() };
-  if (Math.random() < failRate) void ask(state, { combo: { type: "combo", instructions: "Up, up, down, down, left, right, left, right, B, A?" } }).catch(() => null); // Jev rejects it
+  if (Math.random() < failRate) void ask(state, { combo: { type: "combo", instructions: "Up, up, down, down, left, right, left, right, B, A?" } }).catch(() => null); // Laya rejects it
   const first = await ask(state, { button: buttonQuestion(), danger: QUESTIONS.danger, progress: QUESTIONS.progress, coin: QUESTIONS.coin });
   if (!first) return null;
   const events: string[] = [], chosen = first.answers.button?.choice ?? "wait";
@@ -255,7 +255,7 @@ async function turn() {
     }).catch(() => null);
   }
   const hold: Promise<unknown>[] = [];
-  // a jump Jev was unsure of is checked first, and replaced if it doubts it
+  // a jump Laya was unsure of is checked first, and replaced if it doubts it
   if (button === "jump" && (said.sure ?? 1) < 0.6) {
     hold.push((async () => {
       const clears = await ask(state, { jump_clears: QUESTIONS.jumpClears }, first.events.button);
@@ -310,7 +310,7 @@ const server = createServer((req, res) => {
   res.writeHead(404).end();
 });
 server.on("error", (error: NodeJS.ErrnoException) => { console.error(error.code === "EADDRINUSE" ? `Port ${port} is already in use. If Pixel Knight is already running, open http://127.0.0.1:${port}/; otherwise start this one on another port: --port ${port + 1}` : `Pixel Knight could not start: ${error.message}`); process.exit(1); });
-server.listen(port, "127.0.0.1", () => console.log(`Pixel Knight: open http://127.0.0.1:${port}/ to watch Jev play (through ${url}). Ctrl-C stops it.`));
+server.listen(port, "127.0.0.1", () => console.log(`Pixel Knight: open http://127.0.0.1:${port}/ to watch Laya play (through ${url}). Ctrl-C stops it.`));
 process.on("SIGINT", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
 
@@ -320,7 +320,7 @@ for (;;) {
   if (!watchers.size) { await sleep(400); continue; }
   if (game.turn >= shown + ahead && Date.now() - shownAt < 4000) { await sleep(15); continue; } // far enough ahead of the page
   let message;
-  try { message = await turn(); } catch (error) { message = { type: "waiting", reason: `Jeview is not answering at ${proxy}: ${(error as Error).message}` }; }
-  broadcast(message ?? { type: "waiting", reason: "Jev did not answer. Is a Jev key set in Jeview (the key icon, top right)?" });
+  try { message = await turn(); } catch (error) { message = { type: "waiting", reason: `Layaview is not answering at ${proxy}: ${(error as Error).message}` }; }
+  broadcast(message ?? { type: "waiting", reason: "Laya did not answer. Is a Laya key set in Layaview (the key icon, top right)?" });
   if (message?.type !== "turn") await sleep(3000); else if (pace) await sleep(pace);
 }

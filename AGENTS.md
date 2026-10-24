@@ -1,48 +1,53 @@
-# Working on Jeview
+# Working on Layaview
 
-Jeview is a local visualizer for Jev (TypeSafe System One): a gateway your code sends its calls through, with a live
-viewer. It is unofficial, and not affiliated with TypeSafe AI. To *use* a running Jeview, read
-[llms.txt](llms.txt), or `/llms.txt` on the Jeview itself. This file is for changing the code.
+Layaview is a local-first visualizer for Laya decision models, derived from Jeview. It receives System One-shaped requests, forwards them to a configured local Laya adapter, stores complete calls in SQLite, and draws answer/event relationships live.
 
-## The lie of the land
+## Repository map
 
-- `src/jeview.ts`: the whole server. The proxy, the SQLite store, the read API, and the text of llms.txt.
-- `jeview.ts`: the command line. `launch.sh` finds a Node and runs it.
-- `ui/`: the viewer, plain JavaScript with no build step, served from disk on every request.
-- `demo/`: Pixel Knight and Support Desk, each a small server and a page. They play through a running Jeview.
-- `test/jeview.test.ts`: every promise the server makes, against a stand-in for Jev.
+- `src/jeview.ts`: inherited server/store implementation. The filename and exported `createJeview` / `Jeview*` names intentionally remain for upstream-diff compatibility.
+- `layaview.ts`: primary CLI.
+- `jeview.ts`: compatibility launcher.
+- `launch.sh`: Node launcher.
+- `adapter/laya_server.py`: loopback Python Laya inference adapter.
+- `scripts/run-layaview.sh`: full-stack local launcher.
+- `ui/`: viewer, plain JavaScript with no build step.
+- `demo/`: sample clients that drive the running viewer.
+- `test/jeview.test.ts`: server contract tests against a stand-in Laya endpoint.
+- `llms.txt`: generated agent-facing runtime contract.
+- `UPSTREAM.md`: fork provenance and sync boundary.
 
 ## Check your work
 
 ```sh
-npm install          # only the type checker
+npm install
 npm run typecheck
-npm run check:pages  # the browser scripts parse
+npm run check:pages
 npm test
+python3 -m py_compile adapter/laya_server.py
+git diff --check
 ```
 
-Tests never call TypeSafe. The demos do: every call is real and costs money, so do not run them in CI or leave them
-running. They play only while a page is open.
+Run `npm run llms` after changing `llmsText`; a test compares the generated file with the repository copy.
+
+Ordinary tests must not call TypeSafe or download a model. Real Laya inference is an explicit runtime acceptance step.
 
 ## Rules of the house
 
-- **No dependencies at run time.** Node 24 and its standard library are all Jeview needs. Keep it so.
-- **Node runs the TypeScript as it is**, by stripping the types. Use only syntax that can be stripped: no enums, no
-  namespaces, no parameter properties. Imports name the file, `.ts` included.
-- **The body goes to Jev byte for byte**, and Jev's answer comes back as sent, plus `events`. Jeview's own headers
-  (`Jeview-*`) never reach Jev.
-- **The key is never shown**, logged or returned: only whether it is set, and its last four characters.
-- **Loopback only.** Jeview answers to local host names, refuses requests from web pages on other sites, and has no
-  login. Each of these has a test; a change that needs one of them loosened is probably the wrong change.
-- **Nothing leaves the machine but calls to Jev.** No telemetry, no fonts or scripts from elsewhere: the viewer's
-  content security policy allows only its own origin.
-- **Pages are built from nodes and text**, never from HTML strings that carry data: recorded calls hold whatever a
-  caller sent. See `h()` in `ui/app.js`.
-- **The viewer must work with an older server**, and the server with an older viewer's requests: the pages are read
-  from disk while an older process may still be running.
-- After changing `llmsText`, run `npm run llms` to write `llms.txt` again. A test compares the two.
+- **No Node runtime dependencies.** Node 24 and its standard library are all the viewer needs.
+- **Node runs TypeScript directly** by stripping types. Use erasable TypeScript only: no enums, namespaces, or parameter properties.
+- **Keep inference separate.** Do not embed PyTorch or Laya inside the Node viewer. The viewer and Python adapter remain separate processes.
+- **The body goes to the configured Laya endpoint byte for byte.** Layaview adds `events` only on the response side.
+- **Layaview control headers never reach Laya.** Strip both `Layaview-*` and legacy `Jeview-*`.
+- **No TypeSafe key gate or injected authorization.** Caller authorization is stripped before forwarding.
+- **Loopback only by default.** Keep the viewer and included adapter on `127.0.0.1`; a change that broadens this trust boundary requires explicit review.
+- **No telemetry or third-party browser resources.** The viewer CSP remains self-contained.
+- **Recorded data is untrusted.** Build UI from DOM nodes/text rather than HTML strings.
+- **Keep local data private.** The SQLite directory stays `0700`; the database stays `0600`.
+- **Do not fake local cost.** Local Laya input-token metadata may be retained, but TypeSafe pricing must not be applied.
+- **Preserve event semantics.** Event ids remain `<call>:<question>`; a later `Layaview-Trigger` grows a branch from that exact answer.
+- **Preserve compatibility deliberately.** Legacy Jeview trigger/display headers and `--jev-endpoint` remain aliases unless a later migration explicitly removes them.
+- **Preserve upstream lineage.** Do not rewrite or squash away the Jeview baseline tag or remove MIT attribution.
 
-## Writing
+## Writing and commits
 
-Comments say why, in plain words, and only where the code cannot. Commit messages are one sentence about what
-changed for the person using Jeview, then the details. Match the code around you: it is dense on purpose.
+Keep changes focused. Comments explain non-obvious behavior and compatibility boundaries. Stage only intended files. Commit messages should describe what changed for the person using Layaview, with upstream provenance preserved.

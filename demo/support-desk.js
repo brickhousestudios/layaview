@@ -1,5 +1,5 @@
-// Support Desk's screen: each customer's message as a chat, the decisions Jev makes about it as chips under it, in the
-// order they come, and the desk's reply: a template filled in with what Jev decided.
+// Support Desk's screen: each customer's message as a chat, the decisions Laya makes about it as chips under it, in the
+// order they come, and the desk's reply: a template filled in with what Laya decided.
 const $ = (id) => document.getElementById(id);
 const TEAMS = { support: "Support", engineering: "Engineering", billing: "Billing", product: "Product" };
 const TOPICS = { bug: "bug", billing: "billing", how_to: "how-to", feature_request: "feature request", account: "account", other: "other" };
@@ -34,7 +34,7 @@ function handTo(team, thread) {
 // ---------- one conversation ----------
 function open(ticket) {
   $("waiting")?.remove();
-  const chips = el("div", "chips", el("span", "reading", "Jev is reading", el("i"), el("i"), el("i")));
+  const chips = el("div", "chips", el("span", "reading", "Laya is reading", el("i"), el("i"), el("i")));
   const node = el("article", "thread",
     el("div", "row", el("span", "avatar", initials(ticket.from)), el("div", "bubble", el("p", "who", ticket.from, el("small", "", ticket.plan)), el("p", "text", ticket.message))),
     chips);
@@ -47,7 +47,7 @@ function open(ticket) {
 }
 function chip(thread, className, ...words) { thread.chips.querySelector(".reading")?.remove(); const node = el("span", `chip ${className}`, ...words); thread.chips.append(node); return node; }
 
-/** The desk's reply, written again whenever Jev decides something more: a template, filled in with the decisions. */
+/** The desk's reply, written again whenever Laya decides something more: a template, filled in with the decisions. */
 function reply(thread) {
   const { team, upset = 0, urgency = 0, article, credit, spam } = thread.said, first = thread.from.split(" ")[0];
   if (!team && !spam) return;

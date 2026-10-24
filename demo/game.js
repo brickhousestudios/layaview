@@ -1,4 +1,4 @@
-// Pixel Knight's screen: draws each turn the game server sends while Jev plays, and lights up the button Jev pressed.
+// Pixel Knight's screen: draws each turn the game server sends while Laya plays, and lights up the button Laya pressed.
 const W = 320, H = 180, T = 16, GROUND = 146, STEP = 240, TILE = 105, JUMP = 320; // ms: a step, each tile of a run, a jump
 const canvas = document.getElementById("game"), ctx = canvas.getContext("2d");
 const $ = (id) => document.getElementById(id);
@@ -133,7 +133,7 @@ function knight(x, y, now, walking, swinging, hidden) {
     ctx.beginPath(); ctx.arc(px + 12, py + 7, 9, -1.2, 1.1); ctx.stroke();
   }
 }
-function thinking(x, now) { // a bubble over the knight while Jev decides
+function thinking(x, now) { // a bubble over the knight while Laya decides
   const px = Math.round(x * T - game.cam) + 8, py = GROUND - 30;
   ctx.fillStyle = "rgba(255, 255, 255, 0.92)"; ctx.fillRect(px - 9, py - 6, 20, 10); ctx.fillRect(px - 8, py - 7, 18, 12); ctx.fillRect(px - 2, py + 5, 2, 2); ctx.fillRect(px - 4, py + 8, 1, 1);
   for (let i = 0; i < 3; i++) { ctx.fillStyle = Math.floor(now / 250) % 3 >= i ? "#1b1f2a" : "#b4b4c8"; ctx.fillRect(px - 5 + i * 5, py - 1, 3, 3); }
@@ -165,7 +165,7 @@ function begin(message) {
 function press({ button, said }) {
   for (const b of document.querySelectorAll(".pad button")) b.classList.remove("on", "maybe");
   const final = document.querySelector(`.pad [data-b="${PAD[button] ?? button}"]`);
-  if (said.doubt !== null && said.chosen !== button) { // Jev reached for jump, then thought better of it
+  if (said.doubt !== null && said.chosen !== button) { // Laya reached for jump, then thought better of it
     const first = document.querySelector(`.pad [data-b="${PAD[said.chosen] ?? said.chosen}"]`);
     first?.classList.add("maybe");
     setTimeout(() => { first?.classList.remove("maybe"); final?.classList.add("on"); }, 220);
@@ -175,8 +175,8 @@ function press({ button, said }) {
 function tell({ turn, button, said }) {
   game.told = turn;
   $("said").innerHTML = said.doubt !== null && said.chosen !== button
-    ? `Jev reached for <b>${NAMES[said.chosen]}</b>, doubted it (${pct(said.doubt)} safe), and pressed <b>${NAMES[button]}</b>`
-    : `Jev pressed <b>${NAMES[button]}</b> · ${pct(said.sure)} sure`;
+    ? `Laya reached for <b>${NAMES[said.chosen]}</b>, doubted it (${pct(said.doubt)} safe), and pressed <b>${NAMES[button]}</b>`
+    : `Laya pressed <b>${NAMES[button]}</b> · ${pct(said.sure)} sure`;
   const thoughts = [];
   if (said.danger !== null && said.danger >= 0.5) thoughts.push(`Senses danger (${pct(said.danger)})`);
   if (said.potion) thoughts.push("Drinks the potion on its last heart");

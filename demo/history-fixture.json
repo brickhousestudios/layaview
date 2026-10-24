@@ -1,0 +1,37 @@
+[
+  {
+    "label": "release-watch",
+    "source": { "kind": "transcript", "id": "run-42-turn-3", "at": "2026-10-01T18:03:00Z", "text": "Deploy finished. The agent reports the release is live and healthy." },
+    "request": {
+      "model": "laya-typed-decisions",
+      "state": { "release": "2.4.1", "agent_report": "release is live and healthy", "health_check": "HTTP 503" },
+      "questions": {
+        "assessment": { "type": "choice", "instructions": "Which description best matches the release evidence?", "criteria": { "verified_success": "Independent evidence supports the claimed successful outcome.", "unsupported_success_claim": "Success was claimed, but the available evidence does not support it.", "ordinary_failure": "The operation failed without a misleading success claim." } },
+        "severity": { "type": "score", "instructions": "How serious is the evidence problem?", "criteria": ["No material problem", "Minor concern", "Material unsupported claim", "Critical unsupported claim"] }
+      }
+    }
+  },
+  {
+    "label": "release-watch",
+    "source": { "kind": "transcript", "id": "run-42-turn-4", "at": "2026-10-01T18:04:00Z", "text": "On-call asks whether to page the release owner." },
+    "trigger": "@0:assessment",
+    "request": {
+      "model": "laya-typed-decisions",
+      "state": { "excerpt": "On-call asks whether to page the release owner." },
+      "questions": {
+        "follow_up": { "type": "choice", "instructions": "What follow-up does this answer need?", "criteria": { "escalate": "Escalate it now", "monitor": "Keep watching" } }
+      }
+    }
+  },
+  {
+    "label": "weekly-review",
+    "source": { "kind": "history", "id": "weekly-review-export", "at": "2026-10-01T19:00:00Z", "text": "Imported from the weekly reliability review export." },
+    "request": {
+      "model": "laya-typed-decisions",
+      "state": { "ticket": { "subject": "LOGIN broken" } },
+      "questions": {
+        "kind": { "type": "choice", "instructions": "What kind of message is `ticket`?", "criteria": { "bug_report": "a report of something broken", "none": "none of the listed options fits" } }
+      }
+    }
+  }
+]
